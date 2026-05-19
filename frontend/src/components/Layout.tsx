@@ -40,9 +40,9 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'fixed', inset: 0,
     backgroundImage: 'url(/impress-bg.png)',
     backgroundSize: 'cover', backgroundPosition: 'center',
-    filter: 'blur(2px)', transform: 'scale(1.03)', zIndex: 0,
+    filter: 'blur(2px)', transform: 'scale(1.03)', zIndex: -1,
   },
-  contentInner: { position: 'relative', zIndex: 1, padding: 32 },
+  contentInner: { position: 'relative', padding: 32 },
 };
 
 function BellIcon() {

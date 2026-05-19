@@ -76,6 +76,41 @@ const EMPTY_FORM = {
   location: '', notes: '', expiry_date: '',
 };
 
+type SpecField = { key: string; label: string; placeholder: string };
+
+const LAPTOP_SPECS: SpecField[] = [
+  { key: 'Processor', label: 'Processor',        placeholder: 'e.g. Intel Core i7-13th Gen' },
+  { key: 'RAM',       label: 'RAM',              placeholder: 'e.g. 16 GB DDR5' },
+  { key: 'Storage',   label: 'Storage',          placeholder: 'e.g. 512 GB SSD' },
+  { key: 'Display',   label: 'Display',          placeholder: 'e.g. 15.6" FHD IPS' },
+  { key: 'Graphics',  label: 'Graphics / GPU',   placeholder: 'e.g. Intel Iris Xe' },
+  { key: 'OS',        label: 'Operating System', placeholder: 'e.g. Windows 11 Pro' },
+  { key: 'Battery',   label: 'Battery',          placeholder: 'e.g. 72 Wh' },
+];
+
+const MONITOR_SPECS: SpecField[] = [
+  { key: 'Screen Size',    label: 'Screen Size',    placeholder: 'e.g. 27"' },
+  { key: 'Resolution',     label: 'Resolution',     placeholder: 'e.g. 1920×1080 (FHD)' },
+  { key: 'Panel Type',     label: 'Panel Type',     placeholder: 'e.g. IPS' },
+  { key: 'Refresh Rate',   label: 'Refresh Rate',   placeholder: 'e.g. 144 Hz' },
+  { key: 'Connectivity',   label: 'Connectivity',   placeholder: 'e.g. HDMI, DisplayPort' },
+  { key: 'Response Time',  label: 'Response Time',  placeholder: 'e.g. 1 ms GtG' },
+];
+
+function getSpecFields(category: string): SpecField[] {
+  const cat = category.toLowerCase().trim();
+  if (cat.includes('laptop') || cat.includes('macbook')) return LAPTOP_SPECS;
+  if (cat.includes('monitor') || cat.includes('display') || cat.includes('screen')) return MONITOR_SPECS;
+  return [];
+}
+
+const CATEGORIES = [
+  'Laptop', 'Desktop', 'Monitor', 'Keyboard', 'Mouse', 'Printer',
+  'Scanner', 'Projector', 'Network Switch', 'Router', 'Server',
+  'UPS', 'Headset', 'Webcam', 'Mobile Phone', 'Tablet',
+  'Hard Drive / SSD', 'Software', 'Other',
+];
+
 const CSV_HEADERS = ['name', 'category', 'brand', 'model_number', 'serial_number', 'condition', 'status', 'location', 'purchase_date', 'warranty_expiry_date', 'expiry_date', 'notes'];
 
 /* ── CSV helpers ── */
@@ -182,6 +217,10 @@ export default function AssetsPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting]           = useState(false);
 
+  /* specs */
+  const [specForm, setSpecForm]         = useState<Record<string, string>>({});
+  const [editSpecForm, setEditSpecForm] = useState<Record<string, string>>({});
+
   /* report dropdown */
   const [reportOpen, setReportOpen] = useState(false);
 
@@ -262,6 +301,8 @@ export default function AssetsPage() {
       expiry_date:           detailAsset.expiry_date || '',
       notes:         detailAsset.notes || '',
     });
+    const existingSpecs = (detailAsset.specifications as Record<string, string>) || {};
+    setEditSpecForm({ ...existingSpecs });
     setEditError('');
     setEditMode(true);
   };
@@ -279,6 +320,9 @@ export default function AssetsPage() {
       const payload: Record<string, unknown> = { ...editForm };
       ['brand', 'model_number', 'serial_number', 'location', 'notes', 'purchase_date', 'warranty_expiry_date', 'expiry_date']
         .forEach((k) => { if (!payload[k]) delete payload[k]; });
+      const specs: Record<string, string> = {};
+      getSpecFields(editForm.category).forEach(({ key }) => { if (editSpecForm[key]?.trim()) specs[key] = editSpecForm[key].trim(); });
+      payload.specifications = Object.keys(specs).length > 0 ? specs : null;
       const updated = await assetsApi.update(detailAsset.id, payload as Partial<Asset>);
       setDetailAsset(updated);
       setEditMode(false);
@@ -332,8 +376,8 @@ export default function AssetsPage() {
   };
 
   /* ── add asset submit ── */
-  const openAdd  = () => { setForm(EMPTY_FORM); setFormError(''); setShowAddModal(true); };
-  const closeAdd = () => setShowAddModal(false);
+  const openAdd  = () => { setForm(EMPTY_FORM); setSpecForm({}); setFormError(''); setShowAddModal(true); };
+  const closeAdd = () => { setShowAddModal(false); setSpecForm({}); };
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -347,6 +391,9 @@ export default function AssetsPage() {
     try {
       const payload: Record<string, unknown> = { ...form };
       ['brand', 'model_number', 'serial_number', 'location', 'notes', 'expiry_date'].forEach((k) => { if (!payload[k]) delete payload[k]; });
+      const specs: Record<string, string> = {};
+      getSpecFields(form.category).forEach(({ key }) => { if (specForm[key]?.trim()) specs[key] = specForm[key].trim(); });
+      if (Object.keys(specs).length > 0) payload.specifications = specs;
       await assetsApi.create(payload as Partial<Asset>);
       closeAdd(); setPage(1); load();
     } catch (err: any) {
@@ -668,7 +715,10 @@ export default function AssetsPage() {
                     </div>
                     <div>
                       <label style={s.label}>Category *</label>
-                      <input style={s.field} value={editForm.category} onChange={setE('category')} required />
+                      <select style={s.field} value={editForm.category} onChange={setE('category')} required>
+                        <option value="">Select a category</option>
+                        {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
                     </div>
                   </div>
                   <div style={s.row2}>
@@ -722,6 +772,24 @@ export default function AssetsPage() {
                     </div>
                     <div />
                   </div>
+                  {getSpecFields(editForm.category).length > 0 && (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8, marginTop: 4, borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+                        Technical Specifications (optional)
+                      </div>
+                      <div style={s.row2}>
+                        {getSpecFields(editForm.category).map(({ key, label, placeholder }: SpecField) => (
+                          <div key={key}>
+                            <label style={s.label}>{label}</label>
+                            <input style={s.field} value={editSpecForm[key] || ''}
+                              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                                setEditSpecForm((f: Record<string, string>) => ({ ...f, [key]: e.target.value }))}
+                              placeholder={placeholder} />
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
                   <label style={s.label}>Notes</label>
                   <textarea style={{ ...s.field, height: 72, resize: 'vertical' } as React.CSSProperties}
                     value={editForm.notes} onChange={setE('notes')} placeholder="Optional notes…" />
@@ -944,7 +1012,10 @@ export default function AssetsPage() {
                 </div>
                 <div>
                   <label style={s.label}>Category *</label>
-                  <input style={s.addField} value={form.category} onChange={set('category')} placeholder="e.g. Laptop" required />
+                  <select style={s.addField} value={form.category} onChange={set('category')} required>
+                    <option value="">Select a category</option>
+                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
               </div>
               <div style={s.row2}>
@@ -988,6 +1059,24 @@ export default function AssetsPage() {
                 </div>
                 <div />
               </div>
+              {getSpecFields(form.category).length > 0 && (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8, marginTop: 4, borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+                    Technical Specifications (optional)
+                  </div>
+                  <div style={s.row2}>
+                    {getSpecFields(form.category).map(({ key, label, placeholder }: SpecField) => (
+                      <div key={key}>
+                        <label style={s.label}>{label}</label>
+                        <input style={s.addField} value={specForm[key] || ''}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setSpecForm((f: Record<string, string>) => ({ ...f, [key]: e.target.value }))}
+                          placeholder={placeholder} />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
               <label style={s.label}>Notes</label>
               <textarea style={{ ...s.addField, height: 72, resize: 'vertical' } as React.CSSProperties}
                 value={form.notes} onChange={set('notes')} placeholder="Optional notes…" />
