@@ -1,0 +1,104 @@
+version: "3.9"
+
+# ─── Networks ────────────────────────────────────────────────
+networks:
+  asset-net:
+    driver: bridge
+
+# ─── Volumes ─────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  pgadmin_data:
+
+# ─── Services ────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: asset_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-asset_inventory}
+      POSTGRES_USER: ${POSTGRES_USER:-asset_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - asset-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-asset_user} -d ${POSTGRES_DB:-asset_inventory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── pgAdmin (DB GUI — dev only) ─────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: asset_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - asset-net
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── FastAPI Backend ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: asset_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-asset_user}:${POSTGRES_PASSWORD:-devpassword}@db:5432/${POSTGRES_DB:-asset_inventory}
+    volumes:
+      - ./backend:/app              # hot reload in dev
+      - ./backend/uploads:/app/uploads
+    ports:
+      - "8001:8000"
+    networks:
+      - asset-net
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── React Frontend ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: asset_frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:8001/api/v1
+    volumes:
+      - ./frontend/src:/app/src     # hot reload in dev
+      - ./frontend/public:/app/public
+    ports:
+      - "3000:3000"
+    networks:
+      - asset-net
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true

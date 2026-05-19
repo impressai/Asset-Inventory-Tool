@@ -1,0 +1,70 @@
+version: "3.9"
+
+# Production-like docker-compose.
+# Use: docker compose -f docker-compose.prod.yml up --build
+# This mimics what runs on AWS ECS Fargate but locally.
+
+networks:
+  asset-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
+services:
+
+  db:
+    image: postgres:15-alpine
+    container_name: asset_db_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - asset-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: asset_backend_prod
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      APP_ENV: production
+    ports:
+      - "8000:8000"
+    networks:
+      - asset-net
+    depends_on:
+      db:
+        condition: service_healthy
+    # Production: no --reload, use gunicorn with uvicorn workers
+    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker --workers 4 --bind 0.0.0.0:8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: asset_frontend_prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - asset-net
+    depends_on:
+      - backend

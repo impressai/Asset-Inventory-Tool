@@ -1,0 +1,56 @@
+{
+  "name": "asset-inventory-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.0",
+    "react-scripts": "5.0.1",
+    "typescript": "^5.5.2",
+    "axios": "^1.7.2",
+    "zustand": "^4.5.4",
+    "react-query": "^3.39.3",
+    "react-hook-form": "^7.52.1",
+    "zod": "^3.23.8",
+    "@hookform/resolvers": "^3.9.0",
+    "react-hot-toast": "^2.4.1",
+    "react-table": "^7.8.0",
+    "recharts": "^2.12.7",
+    "date-fns": "^3.6.0",
+    "react-datepicker": "^7.3.0",
+    "react-select": "^5.8.0",
+    "react-dropzone": "^14.2.3",
+    "lucide-react": "^0.395.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/react-table": "^7.7.20",
+    "@types/react-datepicker": "^7.0.0",
+    "web-vitals": "^3.5.2"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.4.6",
+    "@testing-library/user-event": "^14.5.2",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.2",
+    "ajv": "^8.17.1",
+    "ajv-keywords": "^5.1.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "test:ci": "react-scripts test --watchAll=false --coverage",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write src/**/*.{ts,tsx,css}"
+  },
+  "eslintConfig": {
+    "extends": ["react-app", "react-app/jest"]
+  },
+  "browserslist": {
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+  },
+  "proxy": "http://backend:8000"
+}

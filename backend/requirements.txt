@@ -1,0 +1,45 @@
+# ─── Web Framework ───────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+gunicorn==22.0.0
+
+# ─── Database ────────────────────────────
+sqlalchemy==2.0.30
+alembic==1.13.1
+psycopg2-binary==2.9.9
+asyncpg==0.29.0                 # async postgres driver
+
+# ─── Auth & Security ─────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.9         # form data / file uploads
+
+# ─── Pydantic ────────────────────────────
+pydantic==2.7.1
+pydantic-settings==2.2.1
+email-validator==2.1.1
+
+# ─── HTTP Client ─────────────────────────
+httpx==0.27.0
+
+# ─── File & Document Handling ────────────
+boto3==1.34.113                 # S3 uploads
+python-magic==0.4.27            # MIME type detection
+Pillow==10.3.0                  # Image processing
+
+# ─── Export / Reporting ──────────────────
+openpyxl==3.1.3                 # Excel export
+reportlab==4.2.0                # PDF export
+
+# ─── Email ───────────────────────────────
+emails==0.6
+jinja2==3.1.4                   # Email templates
+
+# ─── Task Scheduling (warranty alerts) ───
+apscheduler==3.10.4
+
+# ─── Utilities ───────────────────────────
+python-dotenv==1.0.1
+structlog==24.1.0               # Structured logging
+slowapi==0.1.9                  # Rate limiting
