@@ -13,6 +13,14 @@ class PurchaseCreate(BaseModel):
     warranty_details: Optional[str] = None
 
 
+class PurchaseUpdate(BaseModel):
+    vendor_name: Optional[str] = None
+    invoice_number: Optional[str] = None
+    purchase_date: Optional[date] = None
+    total_cost: Optional[float] = None
+    warranty_details: Optional[str] = None
+
+
 class PurchaseResponse(BaseModel):
     id: UUID
     vendor_name: str

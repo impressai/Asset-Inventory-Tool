@@ -8,12 +8,13 @@ from app.models.models import ApprovalStatus
 
 class AssignmentCreate(BaseModel):
     asset_id: UUID
-    # Either link to a system user OR supply a free-text name
     user_id: Optional[UUID] = None
     assignee_name: Optional[str] = None
     assignee_email: Optional[str] = None
+    employee_id: Optional[str] = None
+    designation: Optional[str] = None
     department: Optional[str] = None
-    assignment_date: Optional[date] = None   # defaults to today if omitted
+    assignment_date: Optional[date] = None
     expected_return_date: Optional[date] = None
     notes: Optional[str] = None
 
@@ -24,6 +25,8 @@ class AssignmentResponse(BaseModel):
     user_id: Optional[UUID] = None
     assignee_name: Optional[str] = None
     assignee_email: Optional[str] = None
+    employee_id: Optional[str] = None
+    designation: Optional[str] = None
     department: Optional[str] = None
     assignment_date: date
     return_date: Optional[date] = None

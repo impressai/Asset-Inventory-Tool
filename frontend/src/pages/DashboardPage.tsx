@@ -138,12 +138,16 @@ export default function DashboardPage() {
   const [summary, setSummary]         = useState<any>(null);
   const [categoryBreakdown, setCategoryBreakdown] = useState<Record<string, Record<string, number>>>({});
   const [warnings, setWarnings]       = useState<any[]>([]);
+  const [softwareExpiring, setSoftwareExpiring] = useState<any[]>([]);
+  const [overdueAssignments, setOverdueAssignments] = useState<any[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
     reportsApi.summary().then(setSummary).catch(() => {});
     reportsApi.byCategory().then(setCategoryBreakdown).catch(() => {});
     notificationsApi.warrantyExpiring(30).then((r) => setWarnings(r.assets)).catch(() => {});
+    notificationsApi.softwareExpiring(30).then((r) => setSoftwareExpiring(r.assets)).catch(() => {});
+    (notificationsApi as any).overdueAssignments().then((r: any) => setOverdueAssignments(r.assignments)).catch(() => {});
   }, []);
 
   const statusData = summary?.by_status
@@ -265,6 +269,77 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {/* ── Overdue assignments ── */}
+      {overdueAssignments.length > 0 && (
+        <>
+          <div style={s.section}>Overdue Returns (past expected return date)</div>
+          <table style={{ ...s.table, marginBottom: 24 }}>
+            <thead>
+              <tr>
+                <th style={s.th}>Asset</th>
+                <th style={s.th}>Tag</th>
+                <th style={s.th}>Assigned To</th>
+                <th style={s.th}>Employee ID</th>
+                <th style={s.th}>Designation</th>
+                <th style={s.th}>Department</th>
+                <th style={s.th}>Expected Return</th>
+                <th style={s.th}>Overdue By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overdueAssignments.map((a: any) => (
+                <tr key={a.assignment_id} style={{ cursor: 'pointer' }} onClick={() => navigate('/assets')}>
+                  <td style={s.td}>{a.asset_name}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{a.asset_tag}</td>
+                  <td style={s.td}>{a.assignee_name || '—'}</td>
+                  <td style={{ ...s.td, fontSize: 12 }}>{a.employee_id || '—'}</td>
+                  <td style={{ ...s.td, fontSize: 12 }}>{a.designation || '—'}</td>
+                  <td style={{ ...s.td, fontSize: 12 }}>{a.department || '—'}</td>
+                  <td style={{ ...s.td, color: '#ef4444', fontWeight: 600 }}>{a.expected_return_date}</td>
+                  <td style={s.td}>
+                    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: '#fef2f2', color: '#ef4444' }}>
+                      {a.days_overdue}d
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {/* ── Software / license expiry warnings ── */}
+      {softwareExpiring.length > 0 && (
+        <>
+          <div style={s.section}>🔔 License / Subscription Expiring Soon (next 30 days)</div>
+          <table style={{ ...s.table, marginBottom: 24 }}>
+            <thead>
+              <tr>
+                <th style={s.th}>Tag</th><th style={s.th}>Name</th>
+                <th style={s.th}>Category</th><th style={s.th}>Expiry Date</th>
+                <th style={s.th}>Days Left</th><th style={s.th}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {softwareExpiring.map((a: any) => {
+                const daysLeft = Math.ceil((new Date(a.expiry_date).getTime() - Date.now()) / 86400000);
+                const urgentColor = daysLeft <= 7 ? '#ef4444' : daysLeft <= 14 ? '#f59e0b' : '#3b82f6';
+                return (
+                  <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/assets`)}>
+                    <td style={s.td}>{a.asset_tag}</td>
+                    <td style={s.td}>{a.name}</td>
+                    <td style={s.td}>{a.category}</td>
+                    <td style={{ ...s.td, fontWeight: 600, color: urgentColor }}>{a.expiry_date}</td>
+                    <td style={s.td}><span style={badge(urgentColor)}>{daysLeft}d</span></td>
+                    <td style={s.td}><span style={badge(STATUS_COLORS[a.status] || '#64748b')}>{a.status}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {/* ── Warranty warnings ── */}
       {warnings.length > 0 && (

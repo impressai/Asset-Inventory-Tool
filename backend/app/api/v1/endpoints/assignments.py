@@ -67,6 +67,8 @@ def create_assignment(
         user_id=payload.user_id,
         assignee_name=payload.assignee_name,
         assignee_email=payload.assignee_email,
+        employee_id=payload.employee_id,
+        designation=payload.designation,
         department=payload.department,
         assignment_date=payload.assignment_date or date.today(),
         expected_return_date=payload.expected_return_date,
@@ -76,11 +78,17 @@ def create_assignment(
     )
     asset.status = AssetStatus.ASSIGNED
 
+    desc = f"Assigned to {display_name}"
+    extras = []
+    if payload.employee_id: extras.append(f"ID: {payload.employee_id}")
+    if payload.designation:  extras.append(payload.designation)
+    if payload.department:   extras.append(payload.department)
+    if extras: desc += f" ({', '.join(extras)})"
+
     history = AssetHistory(
         asset_id=payload.asset_id,
         event_type=HistoryEventType.ASSIGNED,
-        description=f"Assigned to {display_name}"
-        + (f" ({payload.department})" if payload.department else ""),
+        description=desc,
         performed_by=current_user.id,
     )
 
@@ -132,6 +140,8 @@ def return_asset(
     snapshot = {
         "assignee_name":        assignment.assignee_name,
         "assignee_email":       assignment.assignee_email,
+        "employee_id":          assignment.employee_id,
+        "designation":          assignment.designation,
         "department":           assignment.department,
         "assignment_date":      str(assignment.assignment_date),
         "return_date":          str(return_date),

@@ -73,10 +73,10 @@ const s: Record<string, React.CSSProperties> = {
 const EMPTY_FORM = {
   name: '', category: '', brand: '', model_number: '', serial_number: '',
   condition: 'new' as AssetCondition, status: 'stock' as AssetStatus,
-  location: '', notes: '',
+  location: '', notes: '', expiry_date: '',
 };
 
-const CSV_HEADERS = ['name', 'category', 'brand', 'model_number', 'serial_number', 'condition', 'status', 'location', 'purchase_date', 'warranty_expiry_date', 'notes'];
+const CSV_HEADERS = ['name', 'category', 'brand', 'model_number', 'serial_number', 'condition', 'status', 'location', 'purchase_date', 'warranty_expiry_date', 'expiry_date', 'notes'];
 
 /* ── CSV helpers ── */
 function toCSV(assets: Asset[]): string {
@@ -126,8 +126,8 @@ const extractError = (err: any, fallback: string): string => {
 };
 
 const EMPTY_ASSIGN = {
-  assignee_name: '', assignee_email: '', department: '',
-  assignment_date: today(), expected_return_date: '', notes: '',
+  assignee_name: '', assignee_email: '', employee_id: '', designation: '',
+  department: '', assignment_date: today(), expected_return_date: '', notes: '',
 };
 
 function DetailRow({ label, value }: { label: string; value?: string | null }) {
@@ -203,6 +203,13 @@ export default function AssetsPage() {
     assetsApi.list(params).then((r) => { setAssets(r.items); setTotal(r.total); }).catch(() => {});
   };
 
+  // Sync filters when URL params change (e.g. navigating from the Assets dropdown)
+  useEffect(() => {
+    setStatusFilter(searchParams.get('status') || '');
+    setCategoryFilter(searchParams.get('category') || '');
+    setPage(1);
+  }, [searchParams]); // eslint-disable-line
+
   useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter]); // eslint-disable-line
 
   /* ── open detail ── */
@@ -252,6 +259,7 @@ export default function AssetsPage() {
       status:        detailAsset.status,
       purchase_date:         detailAsset.purchase_date || '',
       warranty_expiry_date:  detailAsset.warranty_expiry_date || '',
+      expiry_date:           detailAsset.expiry_date || '',
       notes:         detailAsset.notes || '',
     });
     setEditError('');
@@ -269,7 +277,7 @@ export default function AssetsPage() {
     setEditSaving(true); setEditError('');
     try {
       const payload: Record<string, unknown> = { ...editForm };
-      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'purchase_date', 'warranty_expiry_date']
+      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'purchase_date', 'warranty_expiry_date', 'expiry_date']
         .forEach((k) => { if (!payload[k]) delete payload[k]; });
       const updated = await assetsApi.update(detailAsset.id, payload as Partial<Asset>);
       setDetailAsset(updated);
@@ -292,7 +300,9 @@ export default function AssetsPage() {
         assignee_name: assignForm.assignee_name.trim(),
         assignment_date: assignForm.assignment_date || today(),
       };
-      if (assignForm.assignee_email.trim())  payload.assignee_email    = assignForm.assignee_email.trim();
+      if (assignForm.assignee_email.trim())  payload.assignee_email     = assignForm.assignee_email.trim();
+      if (assignForm.employee_id.trim())     payload.employee_id        = assignForm.employee_id.trim();
+      if (assignForm.designation.trim())     payload.designation        = assignForm.designation.trim();
       if (assignForm.department.trim())      payload.department         = assignForm.department.trim();
       if (assignForm.expected_return_date)   payload.expected_return_date = assignForm.expected_return_date;
       if (assignForm.notes.trim())           payload.notes              = assignForm.notes.trim();
@@ -336,7 +346,7 @@ export default function AssetsPage() {
     setSaving(true); setFormError('');
     try {
       const payload: Record<string, unknown> = { ...form };
-      ['brand', 'model_number', 'serial_number', 'location', 'notes'].forEach((k) => { if (!payload[k]) delete payload[k]; });
+      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'expiry_date'].forEach((k) => { if (!payload[k]) delete payload[k]; });
       await assetsApi.create(payload as Partial<Asset>);
       closeAdd(); setPage(1); load();
     } catch (err: any) {
@@ -415,6 +425,7 @@ export default function AssetsPage() {
         location:             r.location || undefined,
         purchase_date:        r.purchase_date || undefined,
         warranty_expiry_date: r.warranty_expiry_date || undefined,
+        expiry_date:          r.expiry_date || undefined,
         notes:                r.notes || undefined,
       }));
       const result = await assetsApi.bulkCreate(payload);
@@ -434,6 +445,22 @@ export default function AssetsPage() {
 
   return (
     <div>
+      <div style={s.toolbar}>
+        <input style={s.input} placeholder="Search name / tag / serial…" value={search}
+          onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} />
+        <select style={s.select} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+          <option value="">All statuses</option>
+          {(['stock', 'assigned', 'faulty', 'sold'] as AssetStatus[]).map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <select style={s.select} value={conditionFilter} onChange={(e) => { setConditionFilter(e.target.value); setPage(1); }}>
+          <option value="">All conditions</option>
+          {(['new', 'good', 'damaged', 'retired'] as AssetCondition[]).map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <input style={s.input} placeholder="Filter by category…" value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }} />
+        <button style={s.btn} onClick={() => { setPage(1); load(); }}>Search</button>
+      </div>
+
       <div style={s.header}>
         <h2 style={s.heading}>Assets ({total})</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -471,22 +498,6 @@ export default function AssetsPage() {
           </div>
           {isAdmin && <button style={s.btnGreen} onClick={openAdd}>+ Add Asset</button>}
         </div>
-      </div>
-
-      <div style={s.toolbar}>
-        <input style={s.input} placeholder="Search name / tag / serial…" value={search}
-          onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} />
-        <select style={s.select} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-          <option value="">All statuses</option>
-          {(['stock', 'assigned', 'faulty', 'sold'] as AssetStatus[]).map((v) => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select style={s.select} value={conditionFilter} onChange={(e) => { setConditionFilter(e.target.value); setPage(1); }}>
-          <option value="">All conditions</option>
-          {(['new', 'good', 'damaged', 'retired'] as AssetCondition[]).map((v) => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <input style={s.input} placeholder="Filter by category…" value={categoryFilter}
-          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }} />
-        <button style={s.btn} onClick={() => { setPage(1); load(); }}>Search</button>
       </div>
 
       <table style={s.table}>
@@ -562,6 +573,8 @@ export default function AssetsPage() {
                 <div style={{ ...s.assignBox, borderLeft: '4px solid #3b82f6' }}>
                   <div style={s.detailGrid}>
                     <DetailRow label="Assigned To"   value={(activeAssignment as any).assignee_name || '—'} />
+                    <DetailRow label="Employee ID"   value={(activeAssignment as any).employee_id} />
+                    <DetailRow label="Designation"   value={(activeAssignment as any).designation} />
                     <DetailRow label="Email"         value={(activeAssignment as any).assignee_email} />
                     <DetailRow label="Department"    value={activeAssignment.department} />
                     <DetailRow label="Assigned On"   value={fmt(activeAssignment.assignment_date)} />
@@ -594,6 +607,16 @@ export default function AssetsPage() {
                       <div>
                         <label style={s.label}>Assignee Name *</label>
                         <input style={s.field} value={assignForm.assignee_name} onChange={setA('assignee_name')} placeholder="e.g. John Smith" required />
+                      </div>
+                      <div>
+                        <label style={s.label}>Employee ID</label>
+                        <input style={s.field} value={assignForm.employee_id} onChange={setA('employee_id')} placeholder="e.g. EMP-001" />
+                      </div>
+                    </div>
+                    <div style={s.row2}>
+                      <div>
+                        <label style={s.label}>Designation</label>
+                        <input style={s.field} value={assignForm.designation} onChange={setA('designation')} placeholder="e.g. Software Engineer" />
                       </div>
                       <div>
                         <label style={s.label}>Email</label>
@@ -692,6 +715,13 @@ export default function AssetsPage() {
                       <input style={s.field} type="date" value={editForm.warranty_expiry_date} onChange={setE('warranty_expiry_date')} />
                     </div>
                   </div>
+                  <div style={s.row2}>
+                    <div>
+                      <label style={s.label}>License / Subscription Expiry</label>
+                      <input style={s.field} type="date" value={editForm.expiry_date} onChange={setE('expiry_date')} />
+                    </div>
+                    <div />
+                  </div>
                   <label style={s.label}>Notes</label>
                   <textarea style={{ ...s.field, height: 72, resize: 'vertical' } as React.CSSProperties}
                     value={editForm.notes} onChange={setE('notes')} placeholder="Optional notes…" />
@@ -714,6 +744,7 @@ export default function AssetsPage() {
                   <div style={s.detailGrid}>
                     <DetailRow label="Purchase Date"   value={fmt(detailAsset.purchase_date)} />
                     <DetailRow label="Warranty Expiry" value={fmt(detailAsset.warranty_expiry_date)} />
+                    <DetailRow label="License / Subscription Expiry" value={fmt(detailAsset.expiry_date)} />
                     <DetailRow label="Added On"        value={fmt(detailAsset.created_at)} />
                     <DetailRow label="Last Updated"    value={detailAsset.updated_at ? fmt(detailAsset.updated_at) : undefined} />
                   </div>
@@ -762,6 +793,12 @@ export default function AssetsPage() {
                           <div style={{ marginTop: 8, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px' }}>
                             {snap.assignee_name && (
                               <div><div style={s.detailKey}>Previous Holder</div><div style={{ ...s.detailVal, color: '#c2410c' }}>{snap.assignee_name}</div></div>
+                            )}
+                            {snap.employee_id && (
+                              <div><div style={s.detailKey}>Employee ID</div><div style={s.detailVal}>{snap.employee_id}</div></div>
+                            )}
+                            {snap.designation && (
+                              <div><div style={s.detailKey}>Designation</div><div style={s.detailVal}>{snap.designation}</div></div>
                             )}
                             {snap.assignee_email && (
                               <div><div style={s.detailKey}>Email</div><div style={s.detailVal}>{snap.assignee_email}</div></div>
@@ -943,6 +980,13 @@ export default function AssetsPage() {
                     {(['stock', 'assigned', 'faulty', 'sold'] as AssetStatus[]).map((v) => <option key={v} value={v}>{v}</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={s.row2}>
+                <div>
+                  <label style={s.label}>License / Subscription Expiry</label>
+                  <input style={s.addField} type="date" value={form.expiry_date} onChange={set('expiry_date')} />
+                </div>
+                <div />
               </div>
               <label style={s.label}>Notes</label>
               <textarea style={{ ...s.addField, height: 72, resize: 'vertical' } as React.CSSProperties}

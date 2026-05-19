@@ -36,6 +36,7 @@ export interface Asset {
   location?: string;
   purchase_date?: string;
   warranty_expiry_date?: string;
+  expiry_date?: string;
   notes?: string;
   purchase_id?: string;
   is_active: boolean;
@@ -70,6 +71,10 @@ export interface Assignment {
   asset?: Asset;
   user_id: string;
   assigned_user?: User;
+  assignee_name?: string;
+  assignee_email?: string;
+  employee_id?: string;
+  designation?: string;
   department?: string;
   assignment_date: string;
   return_date?: string;
@@ -113,6 +118,7 @@ export interface TokenResponse {
 export interface AssetSummary {
   total_assets: number;
   by_status: Record<AssetStatus, number>;
+  by_category: Record<string, number>;
 }
 
 // ─── Pagination ───────────────────────────────────────────────

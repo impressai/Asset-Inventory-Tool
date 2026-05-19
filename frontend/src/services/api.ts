@@ -106,6 +106,8 @@ export const assignmentsApi = {
     user_id?: string;
     assignee_name?: string;
     assignee_email?: string;
+    employee_id?: string;
+    designation?: string;
     department?: string;
     assignment_date?: string;
     expected_return_date?: string;
@@ -123,7 +125,13 @@ export const purchasesApi = {
     api.get('/purchases').then(r => r.data),
 
   create: (data: Partial<Purchase>): Promise<Purchase> =>
-    api.post('/purchases', null, { params: data }).then(r => r.data),
+    api.post('/purchases', data).then(r => r.data),
+
+  update: (id: string, data: Partial<Purchase>): Promise<Purchase> =>
+    api.patch(`/purchases/${id}`, data).then(r => r.data),
+
+  delete: (id: string): Promise<void> =>
+    api.delete(`/purchases/${id}`).then(r => r.data),
 
   uploadDocument: (purchaseId: string, file: File): Promise<{ key: string }> => {
     const form = new FormData();
@@ -156,6 +164,12 @@ export const reportsApi = {
 export const notificationsApi = {
   warrantyExpiring: (days = 30) =>
     api.get('/notifications/warranty-expiring', { params: { days } }).then(r => r.data),
+
+  softwareExpiring: (days = 30) =>
+    api.get('/notifications/software-expiring', { params: { days } }).then(r => r.data),
+
+  overdueAssignments: () =>
+    api.get('/notifications/overdue-assignments').then(r => r.data),
 };
 
 // ─── Users ────────────────────────────────────────────────────

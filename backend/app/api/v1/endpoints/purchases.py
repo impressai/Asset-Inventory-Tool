@@ -4,11 +4,12 @@ from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, require_admin_or_manager
+from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager
 from app.models.models import Purchase
-from app.schemas.purchase import PurchaseCreate, PurchaseResponse
+from app.schemas.purchase import PurchaseCreate, PurchaseUpdate, PurchaseResponse
 from app.core.config import settings
 
 router = APIRouter()
@@ -43,6 +44,39 @@ def create_purchase(
     return purchase
 
 
+@router.patch("/{purchase_id}", response_model=PurchaseResponse)
+def update_purchase(
+    purchase_id: UUID,
+    payload: PurchaseUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin_or_manager),
+):
+    purchase = db.query(Purchase).filter(Purchase.id == purchase_id).first()
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    if payload.invoice_number and payload.invoice_number != purchase.invoice_number:
+        if db.query(Purchase).filter(Purchase.invoice_number == payload.invoice_number).first():
+            raise HTTPException(status_code=400, detail="Invoice number already exists")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(purchase, field, value)
+    db.commit()
+    db.refresh(purchase)
+    return purchase
+
+
+@router.delete("/{purchase_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_purchase(
+    purchase_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin_or_manager),
+):
+    purchase = db.query(Purchase).filter(Purchase.id == purchase_id).first()
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    db.delete(purchase)
+    db.commit()
+
+
 @router.post("/{purchase_id}/documents", status_code=status.HTTP_201_CREATED)
 def upload_document(
     purchase_id: UUID,
@@ -74,3 +108,20 @@ def upload_document(
     db.commit()
 
     return {"key": relative_key, "filename": file.filename}
+
+
+@router.get("/{purchase_id}/documents/{filename}")
+def download_document(
+    purchase_id: UUID,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Download an uploaded purchase document."""
+    purchase = db.query(Purchase).filter(Purchase.id == purchase_id).first()
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    file_path = os.path.join(settings.LOCAL_UPLOAD_DIR, "purchases", str(purchase_id), filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, filename=filename)

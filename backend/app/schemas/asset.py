@@ -20,6 +20,7 @@ class AssetBase(BaseModel):
     location: Optional[str] = None
     purchase_date: Optional[date] = None
     warranty_expiry_date: Optional[date] = None
+    expiry_date: Optional[date] = None
     notes: Optional[str] = None
     purchase_id: Optional[UUID] = None
 
@@ -39,6 +40,7 @@ class AssetUpdate(BaseModel):
     status: Optional[AssetStatus] = None
     location: Optional[str] = None
     warranty_expiry_date: Optional[date] = None
+    expiry_date: Optional[date] = None
     notes: Optional[str] = None
 
 
