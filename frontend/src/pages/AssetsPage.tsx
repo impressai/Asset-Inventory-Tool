@@ -186,6 +186,8 @@ export default function AssetsPage() {
   const [statusFilter, setStatusFilter]   = useState(searchParams.get('status') || '');
   const [conditionFilter, setConditionFilter] = useState('');
   const [categoryFilter, setCategoryFilter]   = useState(searchParams.get('category') || '');
+  const [sortBy, setSortBy]     = useState('created_at');
+  const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('desc');
 
   /* add modal */
   const [showAddModal, setShowAddModal] = useState(false);
@@ -234,12 +236,22 @@ export default function AssetsPage() {
   const pageSize = 20;
 
   const load = () => {
-    const params: Record<string, unknown> = { page, page_size: pageSize };
+    const params: Record<string, unknown> = { page, page_size: pageSize, sort_by: sortBy, sort_dir: sortDir };
     if (search) params.search = search;
     if (statusFilter) params.status = statusFilter;
     if (conditionFilter) params.condition = conditionFilter;
     if (categoryFilter) params.category = categoryFilter;
     assetsApi.list(params).then((r) => { setAssets(r.items); setTotal(r.total); }).catch(() => {});
+  };
+
+  const handleSort = (col: string) => {
+    if (sortBy === col) {
+      setSortDir((d: 'asc' | 'desc') => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(col);
+      setSortDir('asc');
+    }
+    setPage(1);
   };
 
   // Sync filters when URL params change (e.g. navigating from the Assets dropdown)
@@ -249,7 +261,7 @@ export default function AssetsPage() {
     setPage(1);
   }, [searchParams]); // eslint-disable-line
 
-  useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter]); // eslint-disable-line
+  useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter, sortBy, sortDir]); // eslint-disable-line
 
   /* ── open detail ── */
   const openDetail = async (asset: Asset) => {
@@ -493,7 +505,7 @@ export default function AssetsPage() {
   return (
     <div>
       <div style={s.toolbar}>
-        <input style={s.input} placeholder="Search name / tag / serial…" value={search}
+        <input style={s.input} placeholder="Search name / tag / serial / assignee…" value={search}
           onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} />
         <select style={s.select} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
           <option value="">All statuses</option>
@@ -503,8 +515,10 @@ export default function AssetsPage() {
           <option value="">All conditions</option>
           {(['new', 'good', 'damaged', 'retired'] as AssetCondition[]).map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
-        <input style={s.input} placeholder="Filter by category…" value={categoryFilter}
-          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }} />
+        <select style={s.select} value={categoryFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setCategoryFilter(e.target.value); setPage(1); }}>
+          <option value="">All categories</option>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
         <button style={s.btn} onClick={() => { setPage(1); load(); }}>Search</button>
       </div>
 
@@ -550,9 +564,25 @@ export default function AssetsPage() {
       <table style={s.table}>
         <thead>
           <tr>
-            <th style={s.th}>Name</th><th style={s.th}>Category</th>
-            <th style={s.th}>Brand</th><th style={s.th}>Status</th><th style={s.th}>Condition</th>
-            <th style={s.th}>Location</th><th style={s.th}>Assigned To</th>
+            {([
+              { label: 'Name',        col: 'name' },
+              { label: 'Category',    col: 'category' },
+              { label: 'Brand',       col: 'brand' },
+              { label: 'Status',      col: 'status' },
+              { label: 'Condition',   col: 'condition' },
+              { label: 'Location',    col: 'location' },
+              { label: 'Assigned To', col: '' },
+            ] as { label: string; col: string }[]).map(({ label, col }) => (
+              <th key={label} style={{ ...s.th, cursor: col ? 'pointer' : 'default', userSelect: 'none', whiteSpace: 'nowrap' }}
+                onClick={() => col && handleSort(col)}>
+                {label}
+                {col && (
+                  <span style={{ marginLeft: 4, opacity: sortBy === col ? 1 : 0.3, fontSize: 10 }}>
+                    {sortBy === col ? (sortDir === 'asc' ? '▲' : '▼') : '▲'}
+                  </span>
+                )}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>

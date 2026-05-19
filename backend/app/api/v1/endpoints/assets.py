@@ -9,10 +9,10 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, subqueryload
-from sqlalchemy import func
+from sqlalchemy import func, asc, desc
 
 from app.api.v1.deps import get_db, get_current_user, require_admin, require_admin_or_manager
-from app.models.models import Asset, AssetStatus, AssetCondition, User, Purchase, AssetHistory, HistoryEventType
+from app.models.models import Asset, AssetStatus, AssetCondition, User, Purchase, AssetHistory, HistoryEventType, Assignment
 from app.schemas.asset import AssetCreate, AssetUpdate, AssetResponse, AssetListResponse
 
 router = APIRouter()
@@ -39,6 +39,8 @@ def list_assets(
     location: Optional[str] = None,
     condition: Optional[AssetCondition] = None,
     vendor: Optional[str] = None,
+    sort_by: Optional[str] = Query(None, description="Field to sort by"),
+    sort_dir: Optional[str] = Query("asc", description="asc or desc"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -50,10 +52,15 @@ def list_assets(
     query = db.query(Asset).filter(Asset.is_active == True)
 
     if search:
+        assigned_asset_ids = db.query(Assignment.asset_id).filter(
+            Assignment.is_active == True,
+            Assignment.assignee_name.ilike(f"%{search}%"),
+        )
         query = query.filter(
             (Asset.name.ilike(f"%{search}%")) |
             (Asset.asset_tag.ilike(f"%{search}%")) |
-            (Asset.serial_number.ilike(f"%{search}%"))
+            (Asset.serial_number.ilike(f"%{search}%")) |
+            (Asset.id.in_(assigned_asset_ids))
         )
 
     if status:
@@ -68,6 +75,14 @@ def list_assets(
         query = query.join(Purchase, Asset.purchase_id == Purchase.id, isouter=True).filter(
             Purchase.vendor_name.ilike(f"%{vendor}%")
         )
+
+    SORTABLE = {
+        'name': Asset.name, 'category': Asset.category, 'brand': Asset.brand,
+        'status': Asset.status, 'condition': Asset.condition, 'location': Asset.location,
+        'asset_tag': Asset.asset_tag, 'created_at': Asset.created_at,
+    }
+    sort_col = SORTABLE.get(sort_by or '', Asset.created_at)
+    query = query.order_by(desc(sort_col) if sort_dir == 'desc' else asc(sort_col))
 
     total = query.count()
     assets = query.options(subqueryload(Asset.assignments)).offset((page - 1) * page_size).limit(page_size).all()
