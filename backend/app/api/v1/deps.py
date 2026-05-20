@@ -66,3 +66,26 @@ def require_admin_or_manager(current_user: User = Depends(get_current_user)) -> 
             detail="Manager or Admin access required",
         )
     return current_user
+
+
+def check_permission(permission_key: str):
+    """Dependency factory — raises 403 if the current user's role lacks the permission."""
+    def _inner(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        from app.models.models import RolePermission
+        # Admin always has all permissions
+        if current_user.role == UserRole.ADMIN:
+            return current_user
+        row = db.query(RolePermission).filter(
+            RolePermission.role == current_user.role.value,
+            RolePermission.permission == permission_key,
+        ).first()
+        if row is None or not row.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your role does not have '{permission_key}' permission.",
+            )
+        return current_user
+    return _inner

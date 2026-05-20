@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     reports,
     users,
     notifications,
+    role_permissions,
 )
 
 api_router = APIRouter()
@@ -25,3 +26,4 @@ api_router.include_router(assignments.router,   prefix="/assignments",   tags=["
 api_router.include_router(history.router,       prefix="/history",       tags=["Asset History"])
 api_router.include_router(reports.router,       prefix="/reports",       tags=["Reports"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(role_permissions.router, prefix="/role-permissions", tags=["Role Permissions"])

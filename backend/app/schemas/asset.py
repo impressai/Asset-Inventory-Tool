@@ -21,8 +21,17 @@ class AssetBase(BaseModel):
     purchase_date: Optional[date] = None
     warranty_expiry_date: Optional[date] = None
     expiry_date: Optional[date] = None
+    license_start_date: Optional[date] = None
     notes: Optional[str] = None
     purchase_id: Optional[UUID] = None
+    # Sale details
+    sale_date:           Optional[date] = None
+    buyer_name:          Optional[str]  = None
+    buyer_email:         Optional[str]  = None
+    buyer_contact:       Optional[str]  = None
+    sale_price:          Optional[float] = None
+    sale_invoice_number: Optional[str]  = None
+    sale_notes:          Optional[str]  = None
 
 
 class AssetCreate(AssetBase):
@@ -41,7 +50,16 @@ class AssetUpdate(BaseModel):
     location: Optional[str] = None
     warranty_expiry_date: Optional[date] = None
     expiry_date: Optional[date] = None
+    license_start_date: Optional[date] = None
     notes: Optional[str] = None
+    # Sale details
+    sale_date:           Optional[date]  = None
+    buyer_name:          Optional[str]   = None
+    buyer_email:         Optional[str]   = None
+    buyer_contact:       Optional[str]   = None
+    sale_price:          Optional[float] = None
+    sale_invoice_number: Optional[str]   = None
+    sale_notes:          Optional[str]   = None
 
 
 class AssetResponse(AssetBase):

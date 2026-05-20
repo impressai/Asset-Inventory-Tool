@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAILS_FROM_EMAIL: str = "noreply@asset-inventory.com"
     EMAILS_FROM_NAME: str = "Asset Inventory"
+    FRONTEND_URL: str = "http://localhost:3000"
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
 
     # ── File Upload ───────────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 10

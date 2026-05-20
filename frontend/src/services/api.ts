@@ -70,6 +70,12 @@ export const authApi = {
   logout: () => api.post('/auth/logout').then(r => r.data),
 
   getMe: () => api.get('/users/me').then(r => r.data),
+
+  forgotPassword: (email: string) =>
+    api.post('/auth/forgot-password', { email }).then(r => r.data),
+
+  resetPassword: (token: string, new_password: string) =>
+    api.post('/auth/reset-password', { token, new_password }).then(r => r.data),
 };
 
 // ─── Assets ───────────────────────────────────────────────────
@@ -158,6 +164,9 @@ export const reportsApi = {
 
   byCategory: (): Promise<Record<string, Record<string, number>>> =>
     api.get('/reports/by-category').then(r => r.data),
+
+  assets: (params: Record<string, unknown>) =>
+    api.get('/reports/assets', { params }).then(r => r.data),
 };
 
 // ─── Notifications ────────────────────────────────────────────
@@ -170,6 +179,18 @@ export const notificationsApi = {
 
   overdueAssignments: () =>
     api.get('/notifications/overdue-assignments').then(r => r.data),
+
+  sendAlerts: (days = 30) =>
+    api.post('/notifications/send-alerts', null, { params: { days } }).then(r => r.data),
+};
+
+// ─── Role Permissions ─────────────────────────────────────────
+export const rolePermissionsApi = {
+  get: (): Promise<Record<string, Record<string, boolean>>> =>
+    api.get('/role-permissions').then(r => r.data),
+
+  update: (data: Record<string, Record<string, boolean>>): Promise<void> =>
+    api.put('/role-permissions', data).then(r => r.data),
 };
 
 // ─── Users ────────────────────────────────────────────────────
@@ -177,6 +198,8 @@ export const usersApi = {
   list: () => api.get('/users').then(r => r.data),
   create: (data: Record<string, unknown>) =>
     api.post('/users', data).then(r => r.data),
+  update: (id: string, data: Record<string, unknown>) =>
+    api.patch(`/users/${id}`, data).then(r => r.data),
 };
 
 export default api;

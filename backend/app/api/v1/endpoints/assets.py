@@ -11,11 +11,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, subqueryload
 from sqlalchemy import func, asc, desc
 
-from app.api.v1.deps import get_db, get_current_user, require_admin, require_admin_or_manager
+from app.api.v1.deps import get_db, get_current_user, require_admin, require_admin_or_manager, check_permission
 from app.models.models import Asset, AssetStatus, AssetCondition, User, Purchase, AssetHistory, HistoryEventType, Assignment
 from app.schemas.asset import AssetCreate, AssetUpdate, AssetResponse, AssetListResponse
+from app.core.email import send_email, asset_added_email, asset_deleted_email
 
 router = APIRouter()
+
+
+def _notify_all_users(db: Session, subject: str, html_body_fn):
+    users = db.query(User).filter(User.is_active == True).all()
+    for user in users:
+        send_email(to_email=user.email, to_name=user.full_name, subject=subject,
+                   html_body=html_body_fn(user.full_name))
 
 
 def _next_asset_tag(db: Session) -> str:
@@ -94,7 +102,7 @@ def list_assets(
 def create_asset(
     payload: AssetCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(check_permission("create_asset")),
 ):
     """Create a new asset. Admin only."""
     asset_tag = _next_asset_tag(db)
@@ -112,6 +120,8 @@ def create_asset(
         db.add(history)
         db.commit()
         db.refresh(asset)
+        _notify_all_users(db, f"New Asset Added: {asset.name} ({asset.asset_tag})",
+            lambda name: asset_added_email(name, asset.name, asset.asset_tag, asset.category, asset.brand, current_user.full_name))
         return asset
     except IntegrityError as e:
         db.rollback()
@@ -138,7 +148,7 @@ def update_asset(
     asset_id: UUID,
     payload: AssetUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(check_permission("edit_asset")),
 ):
     """Update asset fields. Admin/Manager only."""
     asset = db.query(Asset).filter(Asset.id == asset_id, Asset.is_active == True).first()
@@ -180,7 +190,7 @@ def update_asset(
 def delete_asset(
     asset_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(check_permission("delete_asset")),
 ):
     """Soft-delete an asset. Admin/Manager only."""
     asset = db.query(Asset).filter(Asset.id == asset_id).first()
@@ -197,13 +207,15 @@ def delete_asset(
     )
     db.add(history)
     db.commit()
+    _notify_all_users(db, f"Asset Removed: {asset.name} ({asset.asset_tag})",
+        lambda name: asset_deleted_email(name, asset.name, asset.asset_tag, asset.category, current_user.full_name))
 
 
 @router.post("/bulk", status_code=status.HTTP_201_CREATED)
 def bulk_create_assets(
     payloads: List[AssetCreate],
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(check_permission("import_assets")),
 ):
     """Create multiple assets at once from a parsed CSV payload."""
     if not payloads:

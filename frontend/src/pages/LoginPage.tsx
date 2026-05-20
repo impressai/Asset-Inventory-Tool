@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 const styles: Record<string, React.CSSProperties> = {
@@ -102,6 +102,11 @@ export default function LoginPage() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <Link to="/forgot-password" style={{ fontSize: 13, color: '#3b82f6', textDecoration: 'none' }}>
+            Forgot password?
+          </Link>
+        </div>
       </div>
     </div>
   );

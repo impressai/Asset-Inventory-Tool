@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { assetsApi, historyApi, assignmentsApi } from '../services/api';
 import { Asset, AssetStatus, AssetCondition, AssetHistory, Assignment } from '../types';
@@ -73,7 +73,7 @@ const s: Record<string, React.CSSProperties> = {
 const EMPTY_FORM = {
   name: '', category: '', brand: '', model_number: '', serial_number: '',
   condition: 'new' as AssetCondition, status: 'stock' as AssetStatus,
-  location: '', notes: '', expiry_date: '',
+  location: '', notes: '', expiry_date: '', license_start_date: '',
 };
 
 type SpecField = { key: string; label: string; placeholder: string };
@@ -111,7 +111,22 @@ const CATEGORIES = [
   'Hard Drive / SSD', 'Software', 'Other',
 ];
 
-const CSV_HEADERS = ['name', 'category', 'brand', 'model_number', 'serial_number', 'condition', 'status', 'location', 'purchase_date', 'warranty_expiry_date', 'expiry_date', 'notes'];
+const CSV_HEADERS = ['name', 'category', 'brand', 'model_number', 'serial_number', 'condition', 'status', 'location', 'purchase_date', 'warranty_expiry_date', 'license_start_date', 'expiry_date', 'notes'];
+
+/* Maps normalised header keys → internal field names */
+const HEADER_MAP: Record<string, string> = {
+  asset_name:              'name',
+  owner_custodian:         'assignee_name',
+  email_id:                'assignee_email',
+  mail_id:                 'assignee_email',
+  manufacturer_model:      'manufacturer_model',
+  configuration_details:   'notes',
+  asset_status:            'status',
+  warranty_expiry_status:  'warranty_expiry_date',
+  warranty_expiry_date:    'warranty_expiry_date',
+};
+
+const IMPORT_COLUMNS = ['Asset Name', 'Category', 'Employee ID', 'Owner/Custodian', 'Email ID', 'Designation', 'Manufacturer / Model', 'Serial Number', 'Configuration Details', 'Asset Status', 'Purchase Date', 'Warranty Expiry Status', 'Location'];
 
 /* ── CSV helpers ── */
 function toCSV(assets: Asset[]): string {
@@ -134,7 +149,10 @@ function downloadBlob(content: string, filename: string, mime: string) {
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/ /g, '_'));
+  const headers = lines[0].split(',').map(h => {
+    const raw = h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    return HEADER_MAP[raw] || raw;
+  });
   return lines.slice(1).map(line => {
     const vals: string[] = [];
     let cur = '', inQ = false;
@@ -151,6 +169,12 @@ function parseCSV(text: string): Record<string, string>[] {
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const dropItem: React.CSSProperties = {
+  display: 'block', width: '100%', padding: '10px 16px', background: 'none',
+  border: 'none', textAlign: 'left', fontSize: 13, color: '#374151',
+  cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
+};
 
 const extractError = (err: any, fallback: string): string => {
   const detail = err?.response?.data?.detail;
@@ -175,9 +199,10 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
 }
 
 export default function AssetsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
+  const canAdd  = user?.role === 'admin' || user?.role === 'manager';
 
   const [assets, setAssets]               = useState<Asset[]>([]);
   const [total, setTotal]                 = useState(0);
@@ -202,12 +227,21 @@ export default function AssetsPage() {
   const [assignments, setAssignments]     = useState<Assignment[]>([]);
   const [assignLoading, setAssignLoading] = useState(false);
 
-  /* assign form inside detail */
-  const [showAssignForm, setShowAssignForm] = useState(false);
+  /* action panel inside detail */
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [actionsOpen, setActionsOpen]       = useState(false);
+  const [actionPanel, setActionPanel]       = useState<null | 'assign' | 'sell' | 'faulty'>(null);
   const [assignForm, setAssignForm]         = useState(EMPTY_ASSIGN);
   const [assignSaving, setAssignSaving]     = useState(false);
   const [assignError, setAssignError]       = useState('');
   const [returning, setReturning]           = useState(false);
+  const [statusMoving, setStatusMoving]     = useState(false);
+
+  /* sell form */
+  const EMPTY_SALE = { sale_date: today(), buyer_name: '', buyer_email: '', buyer_contact: '', sale_price: '', sale_invoice_number: '', sale_notes: '' };
+  const [saleForm, setSaleForm]   = useState<Record<string, string>>(EMPTY_SALE);
+  const [saleSaving, setSaleSaving] = useState(false);
+  const [saleError, setSaleError]   = useState('');
 
   /* edit form inside detail */
   const [editMode, setEditMode]     = useState(false);
@@ -227,11 +261,12 @@ export default function AssetsPage() {
   const [reportOpen, setReportOpen] = useState(false);
 
   /* import modal */
-  const [showImport, setShowImport]     = useState(false);
-  const [importRows, setImportRows]     = useState<Record<string, string>[]>([]);
-  const [importError, setImportError]   = useState('');
-  const [importing, setImporting]       = useState(false);
-  const [importResult, setImportResult] = useState<{ created: number; errors: { row: number; error: string }[] } | null>(null);
+  const [showImport, setShowImport]       = useState(false);
+  const [importRows, setImportRows]       = useState<Record<string, string>[]>([]);
+  const [importError, setImportError]     = useState('');
+  const [importing, setImporting]         = useState(false);
+  const [importResult, setImportResult]   = useState<{ created: number; assigned: number; errors: { row: number; error: string }[] } | null>(null);
+  const [defaultCategory, setDefaultCategory] = useState('General');
 
   const pageSize = 20;
 
@@ -261,12 +296,30 @@ export default function AssetsPage() {
     setPage(1);
   }, [searchParams]); // eslint-disable-line
 
+  // Open a specific asset detail when navigated from a notification (?open=<asset_id>)
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId) return;
+    setSearchParams((prev: URLSearchParams) => { const n = new URLSearchParams(prev); n.delete('open'); return n; }, { replace: true });
+    assetsApi.get(openId).then(openDetail).catch(() => {});
+  }, [searchParams]); // eslint-disable-line
+
   useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter, sortBy, sortDir]); // eslint-disable-line
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []); // eslint-disable-line
 
   /* ── open detail ── */
   const openDetail = async (asset: Asset) => {
     setDetailAsset(asset);
-    setShowAssignForm(false);
+    setActionPanel(null);
     setAssignError('');
     setHistory([]);
     setAssignments([]);
@@ -283,7 +336,7 @@ export default function AssetsPage() {
     setAssignLoading(false);
   };
 
-  const closeDetail = () => { setDetailAsset(null); setShowAssignForm(false); setEditMode(false); setConfirmDelete(false); };
+  const closeDetail = () => { setDetailAsset(null); setActionPanel(null); setActionsOpen(false); setEditMode(false); setConfirmDelete(false); };
 
   const handleDelete = async () => {
     if (!detailAsset) return;
@@ -311,7 +364,16 @@ export default function AssetsPage() {
       purchase_date:         detailAsset.purchase_date || '',
       warranty_expiry_date:  detailAsset.warranty_expiry_date || '',
       expiry_date:           detailAsset.expiry_date || '',
+      license_start_date:    detailAsset.license_start_date || '',
       notes:         detailAsset.notes || '',
+      // sale details
+      sale_date:           detailAsset.sale_date || '',
+      buyer_name:          detailAsset.buyer_name || '',
+      buyer_email:         detailAsset.buyer_email || '',
+      buyer_contact:       detailAsset.buyer_contact || '',
+      sale_price:          detailAsset.sale_price != null ? String(detailAsset.sale_price) : '',
+      sale_invoice_number: detailAsset.sale_invoice_number || '',
+      sale_notes:          detailAsset.sale_notes || '',
     });
     const existingSpecs = (detailAsset.specifications as Record<string, string>) || {};
     setEditSpecForm({ ...existingSpecs });
@@ -330,8 +392,11 @@ export default function AssetsPage() {
     setEditSaving(true); setEditError('');
     try {
       const payload: Record<string, unknown> = { ...editForm };
-      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'purchase_date', 'warranty_expiry_date', 'expiry_date']
+      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'purchase_date', 'warranty_expiry_date', 'expiry_date', 'license_start_date',
+       'sale_date', 'buyer_name', 'buyer_email', 'buyer_contact', 'sale_invoice_number', 'sale_notes']
         .forEach((k) => { if (!payload[k]) delete payload[k]; });
+      if (payload.sale_price) payload.sale_price = parseFloat(payload.sale_price as string);
+      else delete payload.sale_price;
       const specs: Record<string, string> = {};
       getSpecFields(editForm.category).forEach(({ key }) => { if (editSpecForm[key]?.trim()) specs[key] = editSpecForm[key].trim(); });
       payload.specifications = Object.keys(specs).length > 0 ? specs : null;
@@ -366,7 +431,7 @@ export default function AssetsPage() {
       /* refresh asset status + detail data */
       const updated = await assetsApi.get(detailAsset.id);
       setDetailAsset(updated);
-      setShowAssignForm(false);
+      setActionPanel(null);
       setAssignForm(EMPTY_ASSIGN);
       openDetail(updated);
       load();
@@ -387,6 +452,40 @@ export default function AssetsPage() {
     } finally { setReturning(false); }
   };
 
+  /* ── status move handlers ── */
+  const setSaleF = (f: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setSaleForm(p => ({ ...p, [f]: e.target.value }));
+
+  const handleMoveToSold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset) return;
+    setSaleSaving(true); setSaleError('');
+    try {
+      const payload: Record<string, unknown> = { status: 'sold' };
+      if (saleForm.sale_date)           payload.sale_date           = saleForm.sale_date;
+      if (saleForm.buyer_name)          payload.buyer_name          = saleForm.buyer_name;
+      if (saleForm.buyer_email)         payload.buyer_email         = saleForm.buyer_email;
+      if (saleForm.buyer_contact)       payload.buyer_contact       = saleForm.buyer_contact;
+      if (saleForm.sale_price)          payload.sale_price          = parseFloat(saleForm.sale_price);
+      if (saleForm.sale_invoice_number) payload.sale_invoice_number = saleForm.sale_invoice_number;
+      if (saleForm.sale_notes)          payload.sale_notes          = saleForm.sale_notes;
+      const updated = await assetsApi.update(detailAsset.id, payload as Partial<Asset>);
+      setDetailAsset(updated); setActionPanel(null); setSaleForm(EMPTY_SALE); load();
+    } catch (err: any) {
+      setSaleError(extractError(err, 'Failed to mark as sold.'));
+    } finally { setSaleSaving(false); }
+  };
+
+  const handleMoveToStatus = async (newStatus: AssetStatus) => {
+    if (!detailAsset) return;
+    setStatusMoving(true);
+    try {
+      const updated = await assetsApi.update(detailAsset.id, { status: newStatus } as Partial<Asset>);
+      setDetailAsset(updated); setActionPanel(null); load();
+    } catch {}
+    finally { setStatusMoving(false); }
+  };
+
   /* ── add asset submit ── */
   const openAdd  = () => { setForm(EMPTY_FORM); setSpecForm({}); setFormError(''); setShowAddModal(true); };
   const closeAdd = () => { setShowAddModal(false); setSpecForm({}); };
@@ -402,7 +501,7 @@ export default function AssetsPage() {
     setSaving(true); setFormError('');
     try {
       const payload: Record<string, unknown> = { ...form };
-      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'expiry_date'].forEach((k) => { if (!payload[k]) delete payload[k]; });
+      ['brand', 'model_number', 'serial_number', 'location', 'notes', 'expiry_date', 'license_start_date'].forEach((k) => { if (!payload[k]) delete payload[k]; });
       const specs: Record<string, string> = {};
       getSpecFields(form.category).forEach(({ key }) => { if (specForm[key]?.trim()) specs[key] = specForm[key].trim(); });
       if (Object.keys(specs).length > 0) payload.specifications = specs;
@@ -446,7 +545,7 @@ export default function AssetsPage() {
       tr:nth-child(even)td{background:#f8fafc}
       @media print{body{padding:0}}</style></head>
       <body><h1>Asset Inventory — ${new Date().toLocaleDateString()}</h1>
-      <table><thead><tr><th>Tag</th><th>Name</th><th>Category</th><th>Brand</th><th>Status</th><th>Condition</th><th>Location</th><th>Serial</th></tr></thead>
+      <table><thead><tr><th>Tag</th><th>Asset Name</th><th>Category</th><th>Brand</th><th>Status</th><th>Condition</th><th>Location</th><th>Serial</th></tr></thead>
       <tbody>${rows}</tbody></table></body></html>`;
     const win = window.open('', '_blank');
     if (win) { win.document.write(html); win.document.close(); win.print(); }
@@ -462,7 +561,7 @@ export default function AssetsPage() {
       try {
         const rows = parseCSV(ev.target?.result as string);
         if (rows.length === 0) { setImportError('No data rows found. Check your CSV format.'); return; }
-        if (!rows[0].name || !rows[0].category) { setImportError('CSV must have at least "name" and "category" columns.'); return; }
+        if (!rows[0].name) { setImportError('CSV must have an "Asset Name" column.'); return; }
         setImportRows(rows);
       } catch { setImportError('Failed to parse CSV file.'); }
     };
@@ -472,28 +571,73 @@ export default function AssetsPage() {
   const handleImportSubmit = async () => {
     if (importRows.length === 0) return;
     setImporting(true); setImportError('');
-    try {
-      const payload = importRows.map(r => ({
-        name:                 r.name,
-        category:             r.category,
-        brand:                r.brand || undefined,
-        model_number:         r.model_number || undefined,
-        serial_number:        r.serial_number || undefined,
-        condition:            (['new','good','damaged','retired'].includes(r.condition) ? r.condition : 'new') as AssetCondition,
-        status:               (['stock','assigned','faulty','sold'].includes(r.status) ? r.status : 'stock') as AssetStatus,
-        location:             r.location || undefined,
-        purchase_date:        r.purchase_date || undefined,
-        warranty_expiry_date: r.warranty_expiry_date || undefined,
-        expiry_date:          r.expiry_date || undefined,
-        notes:                r.notes || undefined,
-      }));
-      const result = await assetsApi.bulkCreate(payload);
-      setImportResult(result);
-      setImportRows([]);
-      load();
-    } catch (err: any) {
-      setImportError(extractError(err, 'Import failed.'));
-    } finally { setImporting(false); }
+    let created = 0, assigned = 0;
+    const errors: { row: number; error: string }[] = [];
+
+    for (let i = 0; i < importRows.length; i++) {
+      const r = importRows[i];
+      try {
+        // Split "Manufacturer / Model" into brand + model_number
+        const mfgRaw = r.manufacturer_model || r.brand || '';
+        const slashIdx = mfgRaw.indexOf('/');
+        const brand       = slashIdx > -1 ? mfgRaw.slice(0, slashIdx).trim() : mfgRaw.trim() || undefined;
+        const model_number = slashIdx > -1 ? mfgRaw.slice(slashIdx + 1).trim() : (r.model_number || undefined);
+
+        // Normalise status
+        const rawStatus = (r.status || '').toLowerCase().trim();
+        const status: AssetStatus = (
+          ['stock','assigned','faulty','sold'].includes(rawStatus) ? rawStatus :
+          rawStatus.includes('assign') || rawStatus.includes('use') || rawStatus.includes('issued') ? 'assigned' :
+          rawStatus.includes('fault') || rawStatus.includes('damage') || rawStatus.includes('repair') ? 'faulty' :
+          rawStatus.includes('sold') || rawStatus.includes('dispos') || rawStatus.includes('retire') ? 'sold' : 'stock'
+        ) as AssetStatus;
+
+        // Try to extract a real date from "Warranty Expiry Status"
+        const parseDate = (s: string) => {
+          if (!s) return undefined;
+          const d = new Date(s);
+          return isNaN(d.getTime()) ? undefined : d.toISOString().slice(0, 10);
+        };
+
+        const asset = await assetsApi.create({
+          name:                 r.name,
+          category:             r.category || defaultCategory,
+          brand:                brand || undefined,
+          model_number:         model_number || undefined,
+          serial_number:        r.serial_number || undefined,
+          condition:            (['new','good','damaged','retired'].includes(r.condition || '') ? r.condition : 'good') as AssetCondition,
+          status,
+          location:             r.location || undefined,
+          purchase_date:        r.purchase_date || undefined,
+          warranty_expiry_date: parseDate(r.warranty_expiry_date || ''),
+          notes:                r.notes || undefined,
+        });
+
+        created++;
+
+        // Create assignment if owner/employee data present
+        if (r.assignee_name || r.employee_id || r.assignee_email) {
+          try {
+            await assignmentsApi.create({
+              asset_id:       asset.id,
+              assignee_name:  r.assignee_name || undefined,
+              assignee_email: r.assignee_email || undefined,
+              employee_id:    r.employee_id || undefined,
+              designation:    r.designation || undefined,
+              assignment_date: today(),
+            });
+            assigned++;
+          } catch { /* asset created but assignment failed — not fatal */ }
+        }
+      } catch (err: any) {
+        errors.push({ row: i + 2, error: extractError(err, 'Failed to create asset') });
+      }
+    }
+
+    setImportResult({ created, assigned, errors });
+    setImportRows([]);
+    load();
+    setImporting(false);
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -557,7 +701,7 @@ export default function AssetsPage() {
               </div>
             )}
           </div>
-          {isAdmin && <button style={s.btnGreen} onClick={openAdd}>+ Add Asset</button>}
+          {canAdd && <button style={s.btnGreen} onClick={openAdd}>+ Add Asset</button>}
         </div>
       </div>
 
@@ -565,7 +709,7 @@ export default function AssetsPage() {
         <thead>
           <tr>
             {([
-              { label: 'Name',        col: 'name' },
+              { label: 'Asset Name',  col: 'name' },
               { label: 'Category',    col: 'category' },
               { label: 'Brand',       col: 'brand' },
               { label: 'Status',      col: 'status' },
@@ -634,15 +778,42 @@ export default function AssetsPage() {
 
             <div style={s.detailBody}>
 
-              {/* ── Assignment section ── */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ ...s.sectionTitle, marginTop: 0 }}>Assignment</div>
-                {detailAsset.status === 'stock' && !showAssignForm && (
-                  <button style={s.btnGreen} onClick={() => { setShowAssignForm(true); setAssignForm({ ...EMPTY_ASSIGN, assignment_date: today() }); setAssignError(''); }}>
-                    + Assign Asset
-                  </button>
+              {/* ── Actions Dropdown ── */}
+              <div ref={actionsRef} style={{ position: 'relative', display: 'inline-block', marginBottom: 16 }}>
+                <button
+                  style={{ ...s.btn, display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => setActionsOpen((o) => !o)}
+                >
+                  Actions <span style={{ fontSize: 10 }}>{actionsOpen ? '▲' : '▼'}</span>
+                </button>
+                {actionsOpen && (
+                  <div style={{ position: 'absolute', top: '110%', left: 0, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.12)', minWidth: 180, zIndex: 50, overflow: 'hidden' }}>
+                    {(detailAsset.status === 'stock' || detailAsset.status === 'faulty') && (
+                      <button style={dropItem} onClick={() => { setActionsOpen(false); setActionPanel(actionPanel === 'assign' ? null : 'assign'); setAssignForm({ ...EMPTY_ASSIGN, assignment_date: today() }); setAssignError(''); }}>
+                        Assign Asset
+                      </button>
+                    )}
+                    {detailAsset.status !== 'sold' && (
+                      <button style={dropItem} onClick={() => { setActionsOpen(false); setActionPanel(actionPanel === 'sell' ? null : 'sell'); setSaleForm(EMPTY_SALE); setSaleError(''); }}>
+                        Mark as Sold
+                      </button>
+                    )}
+                    {(detailAsset.status === 'stock' || detailAsset.status === 'assigned') && (
+                      <button style={{ ...dropItem, color: '#ef4444' }} disabled={statusMoving} onClick={() => { setActionsOpen(false); handleMoveToStatus('faulty' as AssetStatus); }}>
+                        {statusMoving ? 'Moving…' : 'Mark as Faulty'}
+                      </button>
+                    )}
+                    {detailAsset.status !== 'stock' && (
+                      <button style={dropItem} disabled={statusMoving} onClick={() => { setActionsOpen(false); handleMoveToStatus('stock' as AssetStatus); }}>
+                        {statusMoving ? 'Moving…' : 'Move to Stock'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
+
+              {/* ── Assignment section ── */}
+              <div style={s.sectionTitle}>Assignment</div>
 
               {assignLoading ? (
                 <p style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</p>
@@ -667,15 +838,15 @@ export default function AssetsPage() {
                   </div>
                 </div>
               ) : (
-                !showAssignForm && (
+                actionPanel === null && (
                   <p style={{ fontSize: 13, color: '#94a3b8', fontStyle: 'italic' }}>
-                    {detailAsset.status === 'stock' ? 'Not currently assigned. Click "+ Assign Asset" to assign.' : 'No active assignment.'}
+                    {detailAsset.status === 'stock' ? 'Not currently assigned. Use "+ Assign Asset" above to assign.' : 'No active assignment.'}
                   </p>
                 )
               )}
 
               {/* ── Inline Assign Form ── */}
-              {showAssignForm && (
+              {actionPanel === 'assign' && (
                 <div style={s.assignBox}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>Assign Asset</div>
                   {assignError && <div style={s.errorBox}>{assignError}</div>}
@@ -720,8 +891,55 @@ export default function AssetsPage() {
                         value={assignForm.notes} onChange={setA('notes')} placeholder="Optional notes…" />
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                      <button type="button" style={s.btnGhost} onClick={() => setShowAssignForm(false)}>Cancel</button>
+                      <button type="button" style={s.btnGhost} onClick={() => setActionPanel(null)}>Cancel</button>
                       <button type="submit" style={s.btn} disabled={assignSaving}>{assignSaving ? 'Assigning…' : 'Confirm Assignment'}</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* ── Inline Sell Form ── */}
+              {actionPanel === 'sell' && (
+                <div style={s.assignBox}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 14 }}>Mark as Sold</div>
+                  {saleError && <div style={s.errorBox}>{saleError}</div>}
+                  <form onSubmit={handleMoveToSold}>
+                    <div style={s.row2}>
+                      <div>
+                        <label style={s.label}>Buyer Name</label>
+                        <input style={s.field} value={saleForm.buyer_name} onChange={setSaleF('buyer_name')} placeholder="e.g. John Doe" />
+                      </div>
+                      <div>
+                        <label style={s.label}>Buyer Email</label>
+                        <input style={s.field} type="email" value={saleForm.buyer_email} onChange={setSaleF('buyer_email')} placeholder="buyer@email.com" />
+                      </div>
+                    </div>
+                    <div style={s.row2}>
+                      <div>
+                        <label style={s.label}>Buyer Contact</label>
+                        <input style={s.field} value={saleForm.buyer_contact} onChange={setSaleF('buyer_contact')} placeholder="Phone number" />
+                      </div>
+                      <div>
+                        <label style={s.label}>Sale Date</label>
+                        <input style={s.field} type="date" value={saleForm.sale_date} onChange={setSaleF('sale_date')} />
+                      </div>
+                    </div>
+                    <div style={s.row2}>
+                      <div>
+                        <label style={s.label}>Sale Price (₹)</label>
+                        <input style={s.field} type="number" min="0" step="0.01" value={saleForm.sale_price} onChange={setSaleF('sale_price')} placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label style={s.label}>Invoice / Reference No.</label>
+                        <input style={s.field} value={saleForm.sale_invoice_number} onChange={setSaleF('sale_invoice_number')} placeholder="e.g. INV-2024-001" />
+                      </div>
+                    </div>
+                    <label style={s.label}>Sale Notes</label>
+                    <textarea style={{ ...s.field, height: 60, resize: 'vertical' } as React.CSSProperties}
+                      value={saleForm.sale_notes} onChange={setSaleF('sale_notes')} placeholder="Additional sale remarks…" />
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                      <button type="button" style={s.btnGhost} onClick={() => setActionPanel(null)}>Cancel</button>
+                      <button type="submit" style={{ ...s.btn, background: '#64748b' }} disabled={saleSaving}>{saleSaving ? 'Processing…' : 'Confirm Sale'}</button>
                     </div>
                   </form>
                 </div>
@@ -797,10 +1015,13 @@ export default function AssetsPage() {
                   </div>
                   <div style={s.row2}>
                     <div>
+                      <label style={s.label}>License / Subscription Start</label>
+                      <input style={s.field} type="date" value={editForm.license_start_date} onChange={setE('license_start_date')} />
+                    </div>
+                    <div>
                       <label style={s.label}>License / Subscription Expiry</label>
                       <input style={s.field} type="date" value={editForm.expiry_date} onChange={setE('expiry_date')} />
                     </div>
-                    <div />
                   </div>
                   {getSpecFields(editForm.category).length > 0 && (
                     <>
@@ -823,6 +1044,45 @@ export default function AssetsPage() {
                   <label style={s.label}>Notes</label>
                   <textarea style={{ ...s.field, height: 72, resize: 'vertical' } as React.CSSProperties}
                     value={editForm.notes} onChange={setE('notes')} placeholder="Optional notes…" />
+
+                  {/* Sale details — shown only when status = sold */}
+                  {editForm.status === 'sold' && (
+                    <>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 1, margin: '16px 0 10px', paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+                        Sale Details
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div>
+                          <label style={s.label}>Buyer Name</label>
+                          <input style={s.field} value={editForm.buyer_name} onChange={setE('buyer_name')} placeholder="e.g. John Doe" />
+                        </div>
+                        <div>
+                          <label style={s.label}>Buyer Email</label>
+                          <input style={s.field} type="email" value={editForm.buyer_email} onChange={setE('buyer_email')} placeholder="buyer@email.com" />
+                        </div>
+                        <div>
+                          <label style={s.label}>Buyer Contact</label>
+                          <input style={s.field} value={editForm.buyer_contact} onChange={setE('buyer_contact')} placeholder="Phone number" />
+                        </div>
+                        <div>
+                          <label style={s.label}>Sale Date</label>
+                          <input style={s.field} type="date" value={editForm.sale_date} onChange={setE('sale_date')} />
+                        </div>
+                        <div>
+                          <label style={s.label}>Sale Price (₹)</label>
+                          <input style={s.field} type="number" min="0" step="0.01" value={editForm.sale_price} onChange={setE('sale_price')} placeholder="0.00" />
+                        </div>
+                        <div>
+                          <label style={s.label}>Invoice / Reference No.</label>
+                          <input style={s.field} value={editForm.sale_invoice_number} onChange={setE('sale_invoice_number')} placeholder="e.g. INV-2024-001" />
+                        </div>
+                      </div>
+                      <label style={s.label}>Sale Notes</label>
+                      <textarea style={{ ...s.field, height: 60, resize: 'vertical' } as React.CSSProperties}
+                        value={editForm.sale_notes} onChange={setE('sale_notes')} placeholder="Additional sale remarks…" />
+                    </>
+                  )}
+
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
                     <button type="button" style={s.btnGhost} onClick={() => setEditMode(false)}>Cancel</button>
                     <button type="submit" style={s.btn} disabled={editSaving}>{editSaving ? 'Saving…' : 'Save Changes'}</button>
@@ -842,6 +1102,7 @@ export default function AssetsPage() {
                   <div style={s.detailGrid}>
                     <DetailRow label="Purchase Date"   value={fmt(detailAsset.purchase_date)} />
                     <DetailRow label="Warranty Expiry" value={fmt(detailAsset.warranty_expiry_date)} />
+                    <DetailRow label="License / Subscription Start" value={fmt(detailAsset.license_start_date)} />
                     <DetailRow label="License / Subscription Expiry" value={fmt(detailAsset.expiry_date)} />
                     <DetailRow label="Added On"        value={fmt(detailAsset.created_at)} />
                     <DetailRow label="Last Updated"    value={detailAsset.updated_at ? fmt(detailAsset.updated_at) : undefined} />
@@ -863,6 +1124,28 @@ export default function AssetsPage() {
                       <div style={s.sectionTitle}>Notes</div>
                       <div style={{ fontSize: 13, color: '#374151', background: '#f8fafc', borderRadius: 8, padding: '10px 14px', lineHeight: 1.6 }}>
                         {detailAsset.notes}
+                      </div>
+                    </>
+                  )}
+
+                  {detailAsset.status === 'sold' && (detailAsset.buyer_name || detailAsset.sale_date || detailAsset.sale_price != null) && (
+                    <>
+                      <div style={{ ...s.sectionTitle, color: '#94a3b8' }}>Sale Details</div>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
+                        <div style={s.detailGrid}>
+                          <DetailRow label="Buyer Name"    value={detailAsset.buyer_name} />
+                          <DetailRow label="Buyer Email"   value={detailAsset.buyer_email} />
+                          <DetailRow label="Buyer Contact" value={detailAsset.buyer_contact} />
+                          <DetailRow label="Sale Date"     value={fmt(detailAsset.sale_date)} />
+                          <DetailRow label="Sale Price"    value={detailAsset.sale_price != null ? `₹${Number(detailAsset.sale_price).toLocaleString()}` : undefined} />
+                          <DetailRow label="Invoice / Ref" value={detailAsset.sale_invoice_number} />
+                        </div>
+                        {detailAsset.sale_notes && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={s.detailKey}>Sale Notes</div>
+                            <div style={{ ...s.detailVal, lineHeight: 1.6 }}>{detailAsset.sale_notes}</div>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -958,22 +1241,35 @@ export default function AssetsPage() {
 
             {/* Template download */}
             <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 16 }}>
-              <strong>CSV format:</strong> {CSV_HEADERS.join(', ')}
+              <strong>Expected columns:</strong> {IMPORT_COLUMNS.join(', ')}
               <br />
-              <span style={{ color: '#0369a1' }}>name and category are required. condition: new/good/damaged/retired · status: stock/assigned/faulty/sold</span>
+              <span style={{ color: '#0369a1' }}>Asset Name is required. Category defaults to the value below if omitted. Asset Status auto-maps common values.</span>
               <br />
               <span style={{ color: '#0369a1', cursor: 'pointer', textDecoration: 'underline' }}
-                onClick={() => downloadBlob(CSV_HEADERS.join(',') + '\nDell Laptop,Laptop,Dell,XPS-9310,SN001,new,stock,Office 3B,2024-01-01,2027-01-01,Example asset', 'assets-template.csv', 'text/csv')}>
+                onClick={() => downloadBlob(
+                  IMPORT_COLUMNS.join(',') + '\nDell Laptop,Laptop,EMP001,John Doe,john.doe@company.com,IT Engineer,Dell / XPS-9310,SN12345,Intel i7 16GB 512GB SSD,stock,2024-01-15,2027-01-15,Office 3B',
+                  'assets-template.csv', 'text/csv'
+                )}>
                 ⬇ Download template CSV
               </span>
             </div>
+
+            {/* Default category */}
+            <label style={{ ...s.label, fontSize: 13, marginBottom: 14 }}>
+              Default Category <span style={{ fontWeight: 400, color: '#64748b' }}>(used when Category column is blank)</span>
+              <input style={{ ...s.input, marginTop: 4 }} value={defaultCategory}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDefaultCategory(e.target.value)} placeholder="e.g. General" />
+            </label>
 
             {importError && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 12 }}>{importError}</div>}
 
             {importResult ? (
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#166534' }}>✓ Import Complete</div>
-                <div style={{ fontSize: 13, color: '#166534', marginTop: 4 }}>{importResult.created} asset{importResult.created !== 1 ? 's' : ''} created successfully.</div>
+                <div style={{ fontSize: 13, color: '#166534', marginTop: 4 }}>
+                  {importResult.created} asset{importResult.created !== 1 ? 's' : ''} created
+                  {importResult.assigned > 0 ? ` · ${importResult.assigned} assigned` : ''}.
+                </div>
                 {importResult.errors.length > 0 && (
                   <div style={{ marginTop: 8 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#b91c1c', marginBottom: 4 }}>{importResult.errors.length} row(s) failed:</div>
@@ -997,12 +1293,12 @@ export default function AssetsPage() {
                     <div style={{ overflowX: 'auto', maxHeight: 240, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, marginBottom: 14 }}>
                       <table style={{ ...s.table, borderRadius: 0 }}>
                         <thead>
-                          <tr>{['name','category','brand','status','condition','location'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+                          <tr>{['name','assignee_name','manufacturer_model','serial_number','status','location'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
                         </thead>
                         <tbody>
                           {importRows.slice(0, 10).map((r, i) => (
                             <tr key={i}>
-                              {['name','category','brand','status','condition','location'].map(h => <td key={h} style={s.td}>{r[h] || '—'}</td>)}
+                              {['name','assignee_name','manufacturer_model','serial_number','status','location'].map(h => <td key={h} style={s.td}>{r[h] || '—'}</td>)}
                             </tr>
                           ))}
                           {importRows.length > 10 && <tr><td style={s.td} colSpan={6}>…and {importRows.length - 10} more rows</td></tr>}
@@ -1084,10 +1380,13 @@ export default function AssetsPage() {
               </div>
               <div style={s.row2}>
                 <div>
+                  <label style={s.label}>License / Subscription Start</label>
+                  <input style={s.addField} type="date" value={form.license_start_date} onChange={set('license_start_date')} />
+                </div>
+                <div>
                   <label style={s.label}>License / Subscription Expiry</label>
                   <input style={s.addField} type="date" value={form.expiry_date} onChange={set('expiry_date')} />
                 </div>
-                <div />
               </div>
               {getSpecFields(form.category).length > 0 && (
                 <>

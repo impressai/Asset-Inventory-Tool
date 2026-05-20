@@ -5,6 +5,8 @@ import { useAuthStore } from './store/authStore';
 import PrivateRoute from './components/PrivateRoute';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import AssetsPage from './pages/AssetsPage';
 
@@ -23,6 +25,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route element={<PrivateRoute />}>
           <Route element={<Layout />}>

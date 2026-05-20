@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { reportsApi, notificationsApi } from '../services/api';
 
@@ -7,7 +7,6 @@ const staticNavItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/purchases', label: 'Purchases' },
   { to: '/reports', label: 'Reports' },
-  { to: '/users', label: 'Users' },
 ];
 
 const styles: Record<string, React.CSSProperties> = {
@@ -32,10 +31,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   activeLink: { color: '#ea580c', borderBottom: '3px solid #ea580c', fontWeight: 700 },
   userInfo: { fontSize: 13, color: '#1e293b', fontWeight: 500, whiteSpace: 'nowrap' },
-  logoutBtn: {
-    marginLeft: 14, padding: '6px 14px', background: '#ef4444', color: '#fff',
-    border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-  },
   bgLayer: {
     position: 'fixed', inset: 0,
     backgroundImage: 'url(/impress-bg.png)',
@@ -55,7 +50,7 @@ function BellIcon() {
 }
 
 interface NotifItem {
-  id: string; asset_tag: string; name: string; category: string;
+  id: string; asset_id: string; asset_tag: string; name: string; category: string;
   date: string; daysLeft: number;
   type: 'license' | 'warranty' | 'overdue';
   assignee_name?: string; employee_id?: string; designation?: string; department?: string;
@@ -64,9 +59,12 @@ interface NotifItem {
 export default function Layout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [categories, setCategories] = useState<string[]>([]);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   /* notifications */
   const [notifOpen, setNotifOpen] = useState(false);
@@ -92,19 +90,19 @@ export default function Layout() {
       if (sw.status === 'fulfilled') {
         sw.value.assets.forEach((a: any) => {
           const daysLeft = Math.ceil((new Date(a.expiry_date).getTime() - now) / 86400000);
-          items.push({ id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.expiry_date, daysLeft, type: 'license' });
+          items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.expiry_date, daysLeft, type: 'license' });
         });
       }
       if (wa.status === 'fulfilled') {
         wa.value.assets.forEach((a: any) => {
           const daysLeft = Math.ceil((new Date(a.warranty_expiry_date).getTime() - now) / 86400000);
-          items.push({ id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.warranty_expiry_date, daysLeft, type: 'warranty' });
+          items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.warranty_expiry_date, daysLeft, type: 'warranty' });
         });
       }
       if (ov.status === 'fulfilled') {
         ov.value.assignments.forEach((a: any) => {
           items.push({
-            id: a.assignment_id, asset_tag: a.asset_tag, name: a.asset_name,
+            id: a.assignment_id, asset_id: a.asset_id, asset_tag: a.asset_tag, name: a.asset_name,
             category: a.category, date: a.expected_return_date,
             daysLeft: -a.days_overdue,
             type: 'overdue',
@@ -115,13 +113,23 @@ export default function Layout() {
       }
       items.sort((a, b) => a.daysLeft - b.daysLeft);
       setNotifications(items);
+
+      if (items.length > 0) {
+        const today = new Date().toISOString().slice(0, 10);
+        if (localStorage.getItem('last_alert_email_date') !== today) {
+          (notificationsApi as any).sendAlerts(30)
+            .then(() => localStorage.setItem('last_alert_email_date', today))
+            .catch(() => {});
+        }
+      }
     });
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setAssetsOpen(false);
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -281,15 +289,17 @@ export default function Layout() {
                       const color = urgentColor(n);
                       const daysLabel = n.type === 'overdue'
                         ? `${-n.daysLeft}d overdue`
-                        : n.daysLeft <= 0 ? 'Today' : `${n.daysLeft}d`;
+                        : n.daysLeft < 0 ? `${-n.daysLeft}d ago`
+                        : n.daysLeft === 0 ? 'Today' : `${n.daysLeft}d`;
                       const subtitle = n.type === 'overdue'
                         ? `Not returned · due ${n.date}`
-                        : n.type === 'license' ? `License expires: ${n.date}`
-                        : `Warranty expires: ${n.date}`;
+                        : n.type === 'license'
+                          ? (n.daysLeft < 0 ? `License expired: ${n.date}` : `License expires: ${n.date}`)
+                          : (n.daysLeft < 0 ? `Warranty expired: ${n.date}` : `Warranty expires: ${n.date}`);
                       return (
                         <div
                           key={`${n.type}-${n.id}`}
-                          onClick={() => { navigate('/assets'); setNotifOpen(false); }}
+                          onClick={() => { navigate(`/assets?open=${n.asset_id}`); setNotifOpen(false); }}
                           style={{
                             padding: '12px 18px', borderBottom: '1px solid #f8fafc',
                             cursor: 'pointer', transition: 'background 0.12s',
@@ -350,8 +360,77 @@ export default function Layout() {
             )}
           </div>
 
-          <span style={styles.userInfo}>{user?.full_name} &nbsp;·&nbsp; {user?.role}</span>
-          <button style={styles.logoutBtn} onClick={handleLogout}>Logout</button>
+          {/* ── Profile Dropdown ── */}
+          <div ref={profileRef} style={{ position: 'relative' }}>
+            <button
+              onClick={() => setProfileOpen((o) => !o)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: 'none', border: 'none', cursor: 'pointer',
+                padding: '4px 8px', borderRadius: 8,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.06)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+            >
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: 'linear-gradient(135deg,#ea580c,#f97316)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0,
+              }}>
+                {user?.full_name?.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }}>{user?.full_name}</div>
+                <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2 }}>
+                  {({ admin: 'Super Admin', manager: 'Admin', user: 'User' } as Record<string, string>)[user?.role ?? ''] ?? user?.role}
+                </div>
+              </div>
+              <span style={{ fontSize: 10, color: '#64748b', marginLeft: 2 }}>{profileOpen ? '▲' : '▼'}</span>
+            </button>
+
+            {profileOpen && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 300,
+                background: '#fff', borderRadius: 10,
+                boxShadow: '0 4px 24px rgba(0,0,0,0.14)',
+                border: '1px solid #e2e8f0',
+                minWidth: 160, overflow: 'hidden',
+              }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{user?.full_name}</div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{user?.email}</div>
+                </div>
+                <button
+                  onClick={() => { setProfileOpen(false); navigate('/users'); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', width: '100%',
+                    padding: '10px 16px', background: 'none', border: 'none',
+                    cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#374151',
+                    textAlign: 'left', borderBottom: '1px solid #f1f5f9',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  Users & Roles
+                </button>
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    padding: '10px 16px', background: 'none', border: 'none',
+                    cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#ef4444',
+                    textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#fef2f2')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

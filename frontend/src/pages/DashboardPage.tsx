@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { reportsApi, notificationsApi } from '../services/api';
+import { reportsApi, notificationsApi, assetsApi, assignmentsApi } from '../services/api';
 
 const STATUS_COLORS: Record<string, string> = {
-  stock: '#22c55e', assigned: '#3b82f6', faulty: '#ef4444', sold: '#94a3b8',
+  stock: '#4ade80', assigned: '#3b82f6', faulty: '#ef4444', sold: '#94a3b8',
 };
 
 const CATEGORY_PALETTE = [
-  '#f97316', '#8b5cf6', '#3b82f6', '#22c55e', '#ef4444',
+  '#f97316', '#8b5cf6', '#3b82f6', '#4ade80', '#ef4444',
   '#06b6d4', '#ec4899', '#f59e0b', '#84cc16', '#6366f1',
 ];
 
@@ -134,13 +134,102 @@ function StackedBar({ data, colors, onClick }: {
   );
 }
 
+/* ── Asset Preview Modal ── */
+function AssetPreviewModal({ asset, onClose }: { asset: any; onClose: () => void }) {
+  const labelStyle: React.CSSProperties = { fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 2 };
+  const valueStyle: React.CSSProperties = { fontSize: 13, color: '#0f172a', fontWeight: 500 };
+  const fieldStyle: React.CSSProperties = { marginBottom: 14 };
+
+  const Field = ({ label, value }: { label: string; value?: string | null }) =>
+    value ? (
+      <div style={fieldStyle}>
+        <div style={labelStyle}>{label}</div>
+        <div style={valueStyle}>{value}</div>
+      </div>
+    ) : null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 16, width: 480, maxHeight: '85vh', overflowY: 'auto', padding: 28, boxShadow: '0 24px 60px rgba(0,0,0,0.18)' }}
+        onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a' }}>{asset.name}</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 3, fontFamily: 'monospace' }}>{asset.asset_tag}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b', lineHeight: 1, padding: '0 4px' }}>×</button>
+        </div>
+
+        {/* Status + Category */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <span style={{ ...badge(STATUS_COLORS[asset.status] || '#64748b'), fontSize: 12 }}>{asset.status}</span>
+          <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: '#f1f5f9', color: '#374151' }}>{asset.category}</span>
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid #f1f5f9', marginBottom: 18 }} />
+
+        {/* Asset details */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+          <Field label="Brand / Model" value={[asset.brand, asset.model_number].filter(Boolean).join(' ')} />
+          <Field label="Serial Number" value={asset.serial_number} />
+          <Field label="Location" value={asset.location} />
+          <Field label="Department" value={asset.department} />
+          <Field label="Purchase Date" value={asset.purchase_date} />
+          <Field label="Purchase Price" value={asset.purchase_price != null ? `₹${Number(asset.purchase_price).toLocaleString()}` : null} />
+          <Field label="Warranty Expiry" value={asset.warranty_expiry_date} />
+          <Field label="License Start" value={(asset as any).license_start_date} />
+          <Field label="Expiry / License End" value={asset.expiry_date} />
+        </div>
+
+        {/* Current assignment */}
+        {asset.current_assignment && (
+          <>
+            <hr style={{ border: 'none', borderTop: '1px solid #f1f5f9', margin: '8px 0 16px' }} />
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>Currently Assigned</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+              <Field label="Assignee" value={(asset.current_assignment as any).assignee_name} />
+              <Field label="Email" value={(asset.current_assignment as any).assignee_email} />
+              <Field label="Employee ID" value={(asset.current_assignment as any).employee_id} />
+              <Field label="Designation" value={(asset.current_assignment as any).designation} />
+              <Field label="Department" value={(asset.current_assignment as any).department} />
+              <Field label="Assigned On" value={(asset.current_assignment as any).assignment_date} />
+              <Field label="Expected Return" value={(asset.current_assignment as any).expected_return_date} />
+            </div>
+          </>
+        )}
+
+        {asset.notes && (
+          <>
+            <hr style={{ border: 'none', borderTop: '1px solid #f1f5f9', margin: '8px 0 16px' }} />
+            <div style={labelStyle}>Notes</div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{asset.notes}</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [summary, setSummary]         = useState<any>(null);
   const [categoryBreakdown, setCategoryBreakdown] = useState<Record<string, Record<string, number>>>({});
   const [warnings, setWarnings]       = useState<any[]>([]);
   const [softwareExpiring, setSoftwareExpiring] = useState<any[]>([]);
   const [overdueAssignments, setOverdueAssignments] = useState<any[]>([]);
+  const [previewAsset, setPreviewAsset] = useState<any>(null);
   const navigate = useNavigate();
+
+  const openPreview = (id: string) => {
+    Promise.all([
+      assetsApi.get(id),
+      assignmentsApi.list({ asset_id: id }),
+    ]).then(([asset, assignments]) => {
+      const active = (assignments as any[]).find((a: any) => a.is_active);
+      setPreviewAsset({ ...asset, current_assignment: active ?? null });
+    }).catch(() => {});
+  };
 
   useEffect(() => {
     reportsApi.summary().then(setSummary).catch(() => {});
@@ -157,7 +246,7 @@ export default function DashboardPage() {
   const goStatus   = (v: string) => navigate(`/assets?status=${encodeURIComponent(v)}`);
   const goCategory = (v: string) => navigate(`/assets?category=${encodeURIComponent(v)}`);
 
-  const categoryEntries = Object.entries(categoryBreakdown).sort(
+  const categoryEntries = (Object.entries(categoryBreakdown) as [string, Record<string, number>][]).sort(
     ([, a], [, b]) => Object.values(b).reduce((s, n) => s + n, 0) - Object.values(a).reduce((s, n) => s + n, 0)
   );
 
@@ -289,7 +378,7 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {overdueAssignments.map((a: any) => (
-                <tr key={a.assignment_id} style={{ cursor: 'pointer' }} onClick={() => navigate('/assets')}>
+                <tr key={a.assignment_id} style={{ cursor: 'pointer' }} onClick={() => openPreview(a.asset_id)}>
                   <td style={s.td}>{a.asset_name}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{a.asset_tag}</td>
                   <td style={s.td}>{a.assignee_name || '—'}</td>
@@ -316,7 +405,7 @@ export default function DashboardPage() {
           <table style={{ ...s.table, marginBottom: 24 }}>
             <thead>
               <tr>
-                <th style={s.th}>Tag</th><th style={s.th}>Name</th>
+                <th style={s.th}>Tag</th><th style={s.th}>Asset Name</th>
                 <th style={s.th}>Category</th><th style={s.th}>Expiry Date</th>
                 <th style={s.th}>Days Left</th><th style={s.th}>Status</th>
               </tr>
@@ -326,7 +415,7 @@ export default function DashboardPage() {
                 const daysLeft = Math.ceil((new Date(a.expiry_date).getTime() - Date.now()) / 86400000);
                 const urgentColor = daysLeft <= 7 ? '#ef4444' : daysLeft <= 14 ? '#f59e0b' : '#3b82f6';
                 return (
-                  <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/assets`)}>
+                  <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => openPreview(a.id)}>
                     <td style={s.td}>{a.asset_tag}</td>
                     <td style={s.td}>{a.name}</td>
                     <td style={s.td}>{a.category}</td>
@@ -348,13 +437,13 @@ export default function DashboardPage() {
           <table style={s.table}>
             <thead>
               <tr>
-                <th style={s.th}>Tag</th><th style={s.th}>Name</th>
+                <th style={s.th}>Tag</th><th style={s.th}>Asset Name</th>
                 <th style={s.th}>Warranty Expiry</th><th style={s.th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {warnings.map((a: any) => (
-                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/assets')}>
+                <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => openPreview(a.id)}>
                   <td style={s.td}>{a.asset_tag}</td>
                   <td style={s.td}>{a.name}</td>
                   <td style={s.td}>{a.warranty_expiry_date}</td>
@@ -365,6 +454,8 @@ export default function DashboardPage() {
           </table>
         </>
       )}
+
+      {previewAsset && <AssetPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} />}
     </div>
   );
 }

@@ -8,12 +8,13 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager
+from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager, check_permission
 from app.models.models import (
     Assignment, Asset, User, AssetStatus, ApprovalStatus,
     AssetHistory, HistoryEventType,
 )
 from app.schemas.assignment import AssignmentCreate, AssignmentResponse
+from app.core.email import send_email, asset_assigned_email, asset_returned_email
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def list_assignments(
 def create_assignment(
     payload: AssignmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(check_permission("assign_asset")),
 ):
     """Assign an asset. Assignee can be a system user or any free-text name."""
     # Validate asset
@@ -96,6 +97,24 @@ def create_assignment(
     db.add(history)
     db.commit()
     db.refresh(assignment)
+
+    if assignment.assignee_email:
+        send_email(
+            to_email=assignment.assignee_email,
+            to_name=display_name,
+            subject=f"Asset Assigned: {asset.name} ({asset.asset_tag})",
+            html_body=asset_assigned_email(
+                full_name=display_name,
+                asset_name=asset.name,
+                asset_tag=asset.asset_tag,
+                category=asset.category,
+                brand=asset.brand,
+                assignment_date=str(assignment.assignment_date),
+                expected_return_date=str(assignment.expected_return_date) if assignment.expected_return_date else None,
+                notes=assignment.notes,
+            ),
+        )
+
     return assignment
 
 
@@ -103,7 +122,7 @@ def create_assignment(
 def return_asset(
     assignment_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin_or_manager),
+    current_user: User = Depends(check_permission("return_asset")),
 ):
     """Mark asset as returned and log full previous-owner details in history."""
     assignment = db.query(Assignment).filter(
@@ -163,4 +182,19 @@ def return_asset(
     )
     db.add(history)
     db.commit()
+
+    if assignment.assignee_email:
+        send_email(
+            to_email=assignment.assignee_email,
+            to_name=holder_name,
+            subject=f"Asset Returned: {assignment.asset.name} ({assignment.asset.asset_tag})",
+            html_body=asset_returned_email(
+                full_name=holder_name,
+                asset_name=assignment.asset.name,
+                asset_tag=assignment.asset.asset_tag,
+                category=assignment.asset.category,
+                return_date=str(return_date),
+            ),
+        )
+
     return {"message": "Asset returned successfully"}

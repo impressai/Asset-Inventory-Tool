@@ -37,8 +37,17 @@ export interface Asset {
   purchase_date?: string;
   warranty_expiry_date?: string;
   expiry_date?: string;
+  license_start_date?: string;
   notes?: string;
   purchase_id?: string;
+  // Sale details
+  sale_date?: string;
+  buyer_name?: string;
+  buyer_email?: string;
+  buyer_contact?: string;
+  sale_price?: number;
+  sale_invoice_number?: string;
+  sale_notes?: string;
   is_active: boolean;
   created_at: string;
   updated_at?: string;

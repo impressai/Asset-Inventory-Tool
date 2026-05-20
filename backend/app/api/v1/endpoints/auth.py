@@ -4,14 +4,28 @@ Auth Endpoints — login, token refresh, logout
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, get_current_user
 from app.core.security import (
-    verify_password, create_access_token, create_refresh_token, decode_token
+    verify_password, get_password_hash,
+    create_access_token, create_refresh_token, decode_token,
+    create_password_reset_token,
 )
+from app.core.email import send_email, password_reset_email
+from app.core.config import settings
 from app.models.models import User
 from app.schemas.auth import TokenResponse, RefreshRequest
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 router = APIRouter()
 
@@ -78,8 +92,36 @@ def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 def logout(current_user: User = Depends(get_current_user)):
-    """
-    Logout endpoint. JWTs are stateless — client should discard tokens.
-    For token blocklisting, add Redis integration here.
-    """
     return {"message": "Logged out successfully"}
+
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Generate a password reset link and email it. Always returns 200 to avoid user enumeration."""
+    user = db.query(User).filter(User.email == payload.email, User.is_active == True).first()
+    if user:
+        token = create_password_reset_token(str(user.id))
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        send_email(
+            to_email=user.email,
+            to_name=user.full_name,
+            subject="Reset your Asset Inventory password",
+            html_body=password_reset_email(reset_url, user.full_name),
+        )
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Verify reset token and update password."""
+    data = decode_token(payload.token)
+    if not data or data.get("type") != "password_reset":
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    user = db.query(User).filter(User.id == data["sub"], User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return {"message": "Password reset successfully. You can now log in."}

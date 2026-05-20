@@ -8,7 +8,7 @@ from enum import Enum as PyEnum
 
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, Date, DateTime,
-    ForeignKey, Enum, Text, JSON
+    ForeignKey, Enum, Text, JSON, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -94,7 +94,16 @@ class Asset(Base):
     purchase_date = Column(Date, nullable=True)
     warranty_expiry_date = Column(Date, nullable=True)
     expiry_date = Column(Date, nullable=True)
+    license_start_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
+    # Sale details (populated when status → sold)
+    sale_date           = Column(Date, nullable=True)
+    buyer_name          = Column(String(255), nullable=True)
+    buyer_email         = Column(String(255), nullable=True)
+    buyer_contact       = Column(String(100), nullable=True)
+    sale_price          = Column(Float, nullable=True)
+    sale_invoice_number = Column(String(100), nullable=True)
+    sale_notes          = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -192,3 +201,28 @@ class AuditLog(Base):
 
     # Relationships
     performed_by_user = relationship("User", back_populates="audit_logs")
+
+
+# ─── Role Permissions ─────────────────────────────────────────
+PERMISSION_KEYS = [
+    "create_asset",
+    "edit_asset",
+    "delete_asset",
+    "assign_asset",
+    "return_asset",
+    "import_assets",
+    "export_assets",
+    "view_reports",
+    "manage_users",
+]
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    role       = Column(Enum(UserRole), nullable=False)
+    permission = Column(String(100), nullable=False)
+    allowed    = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("role", "permission", name="uq_role_permission"),)
