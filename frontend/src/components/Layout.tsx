@@ -66,6 +66,13 @@ export default function Layout() {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
+  /* inactivity auto-logout */
+  const IDLE_MS      = 60 * 60 * 1000;   // 1 hour
+  const WARN_MS      = 55 * 60 * 1000;   // warn at 55 min
+  const [showIdleWarn, setShowIdleWarn] = useState(false);
+  const idleTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warnTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /* notifications */
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
@@ -139,6 +146,24 @@ export default function Layout() {
     await logout();
     navigate('/login');
   };
+
+  useEffect(() => {
+    const reset = () => {
+      setShowIdleWarn(false);
+      if (warnTimer.current)  clearTimeout(warnTimer.current);
+      if (idleTimer.current)  clearTimeout(idleTimer.current);
+      warnTimer.current = setTimeout(() => setShowIdleWarn(true), WARN_MS);
+      idleTimer.current = setTimeout(() => handleLogout(), IDLE_MS);
+    };
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, reset));
+      if (warnTimer.current) clearTimeout(warnTimer.current);
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, []); // eslint-disable-line
 
   const notifKey  = (n: NotifItem) => `${n.type}-${n.id}-${n.date}`;
   const unseenCount = notifications.filter(n => !seenIds.has(notifKey(n))).length;
@@ -439,6 +464,33 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+
+      {/* ── Idle Warning Modal ── */}
+      {showIdleWarn && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: '32px 28px', width: 360, textAlign: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>⏱</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>Still there?</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>
+              You'll be signed out in <strong>5 minutes</strong> due to inactivity.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button
+                onClick={() => setShowIdleWarn(false)}
+                style={{ padding: '9px 24px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Stay Signed In
+              </button>
+              <button
+                onClick={handleLogout}
+                style={{ padding: '9px 24px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Sign Out Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

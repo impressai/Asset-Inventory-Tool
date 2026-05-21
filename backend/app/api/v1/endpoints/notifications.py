@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
-from app.api.v1.deps import get_db, get_current_user, require_admin
+from app.api.v1.deps import get_db, get_current_user
 from app.models.models import Asset, Assignment, User
 from app.core.email import send_email, notification_alert_email
 
@@ -72,7 +72,7 @@ def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(get_
 
 
 @router.post("/send-alerts")
-def send_alert_emails(days: int = 30, db: Session = Depends(get_db), current_user=Depends(require_admin)):
+def send_alert_emails(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Send notification summary email to all admin users."""
     today = date.today()
     lookback  = today - timedelta(days=days)

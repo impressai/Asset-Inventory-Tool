@@ -126,7 +126,7 @@ export default function UsersPage() {
   const openDetail = (u: User) => { setSelected(u); setEditMode(false); setEditError(''); setEditSaved(false); setConfirmDeactivate(false); };
   const closeDetail = () => { setSelected(null); setEditMode(false); setConfirmDeactivate(false); };
   const openEdit = (u: User) => {
-    setEditForm({ full_name: u.full_name, department: u.department || '', employee_id: (u as any).employee_id || '', role: u.role });
+    setEditForm({ full_name: u.full_name, email: u.email, department: u.department || '', employee_id: (u as any).employee_id || '', role: u.role });
     setEditError(''); setEditSaved(false); setEditMode(true);
   };
 
@@ -137,6 +137,7 @@ export default function UsersPage() {
     try {
       const payload: Record<string, unknown> = { role: editForm.role };
       if (editForm.full_name.trim())   payload.full_name   = editForm.full_name.trim();
+      if (editForm.email.trim())       payload.email       = editForm.email.trim();
       if (editForm.department.trim())  payload.department  = editForm.department.trim();
       if (editForm.employee_id.trim()) payload.employee_id = editForm.employee_id.trim();
       const updated = await usersApi.update(selected.id, payload);
@@ -347,12 +348,14 @@ export default function UsersPage() {
                   {editError && <div style={s.errorBox}>{editError}</div>}
                   <div style={s.row2}>
                     <div><label style={s.label}>Full Name</label><input style={s.field} value={editForm.full_name} onChange={setE('full_name')} /></div>
-                    <div><label style={s.label}>Department</label><input style={s.field} value={editForm.department} onChange={setE('department')} /></div>
+                    <div><label style={s.label}>Email</label><input style={s.field} type="email" value={editForm.email} onChange={setE('email')} /></div>
                   </div>
                   <div style={s.row2}>
+                    <div><label style={s.label}>Department</label><input style={s.field} value={editForm.department} onChange={setE('department')} /></div>
                     <div><label style={s.label}>Employee ID</label><input style={s.field} value={editForm.employee_id} onChange={setE('employee_id')} /></div>
-                    <div>
-                      <label style={s.label}>Role</label>
+                  </div>
+                  <div style={s.row2}>
+                    <div><label style={s.label}>Role</label>
                       <select style={{ ...s.field, color: ROLE_COLORS[editForm.role] || '#374151', fontWeight: 600 }} value={editForm.role} onChange={setE('role')}>
                         <option value="user">User</option>
                         <option value="manager">Admin</option>

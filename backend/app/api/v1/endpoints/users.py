@@ -32,8 +32,22 @@ def create_user(
 ):
     if current_user.role != SUPER_ADMIN and payload.role == UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only a Super Admin can create Super Admin accounts.")
-    if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        if existing.is_active:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        # Reactivate deactivated account with new details
+        existing.full_name       = payload.full_name
+        existing.hashed_password = get_password_hash(payload.password)
+        existing.role            = payload.role
+        existing.department      = payload.department
+        existing.employee_id     = payload.employee_id
+        existing.is_active       = True
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     user = User(
         email=payload.email,
         full_name=payload.full_name,
@@ -78,6 +92,9 @@ def update_user(
     _guard_superadmin(current_user, user)
     if current_user.role != SUPER_ADMIN and payload.role == UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Only a Super Admin can assign the Super Admin role.")
+    if payload.email and payload.email != user.email:
+        if db.query(User).filter(User.email == payload.email, User.id != user_id).first():
+            raise HTTPException(status_code=400, detail="Email already in use by another account.")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     db.commit()

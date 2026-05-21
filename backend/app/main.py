@@ -14,6 +14,7 @@ from slowapi.util import get_remote_address
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.scheduler import start_scheduler, stop_scheduler
 from app.db.session import engine
 from app.db.base import Base
 
@@ -25,7 +26,9 @@ async def lifespan(app: FastAPI):
     log.info("Starting Asset Inventory API", version=settings.APP_VERSION, env=settings.APP_ENV)
     if settings.APP_ENV == "development":
         Base.metadata.create_all(bind=engine)
+    start_scheduler()
     yield
+    stop_scheduler()
     log.info("Shutting down Asset Inventory API")
 
 
