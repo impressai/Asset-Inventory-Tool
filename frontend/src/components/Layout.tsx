@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { reportsApi, notificationsApi } from '../services/api';
+import { reportsApi, notificationsApi, notificationSettingsApi, NotificationConfig, subscriptionsApi } from '../services/api';
 
 const staticNavItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/purchases', label: 'Purchases' },
+  { to: '/subscriptions', label: 'Subscriptions' },
   { to: '/reports', label: 'Reports' },
 ];
 
@@ -52,7 +53,7 @@ function BellIcon() {
 interface NotifItem {
   id: string; asset_id: string; asset_tag: string; name: string; category: string;
   date: string; daysLeft: number;
-  type: 'license' | 'warranty' | 'overdue';
+  type: 'license' | 'warranty' | 'overdue' | 'subscription';
   assignee_name?: string; employee_id?: string; designation?: string; department?: string;
 }
 
@@ -76,6 +77,11 @@ export default function Layout() {
   /* notifications */
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotifItem[]>([]);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [notifConfig, setNotifConfig] = useState<NotificationConfig | null>(null);
+  const [notifConfigDraft, setNotifConfigDraft] = useState<NotificationConfig | null>(null);
+  const [notifConfigSaving, setNotifConfigSaving] = useState(false);
+  const [notifConfigSaved, setNotifConfigSaved] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const [seenIds, setSeenIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('notif_seen') || '[]')); }
@@ -87,49 +93,67 @@ export default function Layout() {
       setCategories(Object.keys(s.by_category || {}));
     }).catch(() => {});
 
-    const now = Date.now();
-    Promise.allSettled([
-      notificationsApi.softwareExpiring(30),
-      notificationsApi.warrantyExpiring(30),
-      notificationsApi.overdueAssignments(),
-    ]).then(([sw, wa, ov]) => {
-      const items: NotifItem[] = [];
-      if (sw.status === 'fulfilled') {
-        sw.value.assets.forEach((a: any) => {
-          const daysLeft = Math.ceil((new Date(a.expiry_date).getTime() - now) / 86400000);
-          items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.expiry_date, daysLeft, type: 'license' });
-        });
-      }
-      if (wa.status === 'fulfilled') {
-        wa.value.assets.forEach((a: any) => {
-          const daysLeft = Math.ceil((new Date(a.warranty_expiry_date).getTime() - now) / 86400000);
-          items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.warranty_expiry_date, daysLeft, type: 'warranty' });
-        });
-      }
-      if (ov.status === 'fulfilled') {
-        ov.value.assignments.forEach((a: any) => {
-          items.push({
-            id: a.assignment_id, asset_id: a.asset_id, asset_tag: a.asset_tag, name: a.asset_name,
-            category: a.category, date: a.expected_return_date,
-            daysLeft: -a.days_overdue,
-            type: 'overdue',
-            assignee_name: a.assignee_name, employee_id: a.employee_id,
-            designation: a.designation, department: a.department,
-          });
-        });
-      }
-      items.sort((a, b) => a.daysLeft - b.daysLeft);
-      setNotifications(items);
+    // Load notification settings then fetch notifications using configured days
+    notificationSettingsApi.get().then(cfg => {
+      setNotifConfig(cfg);
+      setNotifConfigDraft(cfg);
 
-      if (items.length > 0) {
-        const today = new Date().toISOString().slice(0, 10);
-        if (localStorage.getItem('last_alert_email_date') !== today) {
-          (notificationsApi as any).sendAlerts(30)
-            .then(() => localStorage.setItem('last_alert_email_date', today))
-            .catch(() => {});
+      const now = Date.now();
+      const fetches = [
+        cfg.license_enabled  ? notificationsApi.softwareExpiring(cfg.license_days)        : Promise.resolve(null),
+        cfg.warranty_enabled ? notificationsApi.warrantyExpiring(cfg.warranty_days)       : Promise.resolve(null),
+        cfg.overdue_enabled  ? notificationsApi.overdueAssignments()                      : Promise.resolve(null),
+        cfg.license_enabled  ? subscriptionsApi.expiring(cfg.license_days)                : Promise.resolve(null),
+      ];
+
+      Promise.allSettled(fetches).then(([sw, wa, ov, subs]) => {
+        const items: NotifItem[] = [];
+        if (sw.status === 'fulfilled' && sw.value) {
+          sw.value.assets.forEach((a: any) => {
+            const daysLeft = Math.ceil((new Date(a.expiry_date).getTime() - now) / 86400000);
+            items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.expiry_date, daysLeft, type: 'license' });
+          });
         }
-      }
-    });
+        if (wa.status === 'fulfilled' && wa.value) {
+          wa.value.assets.forEach((a: any) => {
+            const daysLeft = Math.ceil((new Date(a.warranty_expiry_date).getTime() - now) / 86400000);
+            items.push({ id: a.id, asset_id: a.id, asset_tag: a.asset_tag, name: a.name, category: a.category, date: a.warranty_expiry_date, daysLeft, type: 'warranty' });
+          });
+        }
+        if (ov.status === 'fulfilled' && ov.value) {
+          ov.value.assignments.forEach((a: any) => {
+            items.push({
+              id: a.assignment_id, asset_id: a.asset_id, asset_tag: a.asset_tag, name: a.asset_name,
+              category: a.category, date: a.expected_return_date,
+              daysLeft: -a.days_overdue,
+              type: 'overdue',
+              assignee_name: a.assignee_name, employee_id: a.employee_id,
+              designation: a.designation, department: a.department,
+            });
+          });
+        }
+        if (subs.status === 'fulfilled' && subs.value) {
+          subs.value.subscriptions.forEach((s: any) => {
+            items.push({
+              id: s.id, asset_id: s.id, asset_tag: s.vendor || '—',
+              name: s.name, category: s.category || 'Subscription',
+              date: s.renewal_date, daysLeft: s.days_left, type: 'subscription',
+            });
+          });
+        }
+        items.sort((a, b) => a.daysLeft - b.daysLeft);
+        setNotifications(items);
+
+        if (cfg.email_enabled && items.length > 0) {
+          const today = new Date().toISOString().slice(0, 10);
+          if (localStorage.getItem('last_alert_email_date') !== today) {
+            (notificationsApi as any).sendAlerts(Math.max(cfg.warranty_days, cfg.license_days))
+              .then(() => localStorage.setItem('last_alert_email_date', today))
+              .catch(() => {});
+          }
+        }
+      });
+    }).catch(() => {});
   }, [location.pathname]);
 
   useEffect(() => {
@@ -320,11 +344,13 @@ export default function Layout() {
                         ? `Not returned · due ${n.date}`
                         : n.type === 'license'
                           ? (n.daysLeft < 0 ? `License expired: ${n.date}` : `License expires: ${n.date}`)
-                          : (n.daysLeft < 0 ? `Warranty expired: ${n.date}` : `Warranty expires: ${n.date}`);
+                          : n.type === 'subscription'
+                            ? (n.daysLeft < 0 ? `Subscription expired: ${n.date}` : `Renewal due: ${n.date}`)
+                            : (n.daysLeft < 0 ? `Warranty expired: ${n.date}` : `Warranty expires: ${n.date}`);
                       return (
                         <div
                           key={`${n.type}-${n.id}`}
-                          onClick={() => { navigate(`/assets?open=${n.asset_id}`); setNotifOpen(false); }}
+                          onClick={() => { navigate(n.type === 'subscription' ? '/subscriptions' : `/assets?open=${n.asset_id}`); setNotifOpen(false); }}
                           style={{
                             padding: '12px 18px', borderBottom: '1px solid #f8fafc',
                             cursor: 'pointer', transition: 'background 0.12s',
@@ -409,7 +435,7 @@ export default function Layout() {
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', lineHeight: 1.2 }}>{user?.full_name}</div>
                 <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.2 }}>
-                  {({ admin: 'Super Admin', manager: 'Admin', user: 'User' } as Record<string, string>)[user?.role ?? ''] ?? user?.role}
+                  {({ admin: 'Super Admin', manager: 'Admin', user: 'User', SUBSCRIPTION_MANAGER: 'Subscription Manager' } as Record<string, string>)[user?.role ?? ''] ?? user?.role}
                 </div>
               </div>
               <span style={{ fontSize: 10, color: '#64748b', marginLeft: 2 }}>{profileOpen ? '▲' : '▼'}</span>
@@ -441,6 +467,19 @@ export default function Layout() {
                   Users & Roles
                 </button>
                 <button
+                  onClick={() => { setProfileOpen(false); setNotifConfigDraft(notifConfig ? { ...notifConfig } : null); setNotifConfigSaved(false); setShowNotifSettings(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', width: '100%',
+                    padding: '10px 16px', background: 'none', border: 'none',
+                    cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#374151',
+                    textAlign: 'left', borderBottom: '1px solid #f1f5f9',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  Notification Settings
+                </button>
+                <button
                   onClick={handleLogout}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
@@ -464,6 +503,222 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+
+      {/* ── Notification Settings Modal ── */}
+      {showNotifSettings && notifConfigDraft && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+          <div style={{ background: '#fff', borderRadius: 14, width: 480, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 8px 48px rgba(0,0,0,0.22)' }}>
+            <div style={{ background: 'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)', borderRadius: '14px 14px 0 0', padding: '20px 24px', color: '#fff' }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>Notification Settings</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>Configure what alerts you receive and when</div>
+            </div>
+            <div style={{ padding: '24px' }}>
+              {notifConfigSaved && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 16 }}>✓ Settings saved.</div>}
+
+              {/* Warranty */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Warranty Expiry</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Alert when warranty is nearing expiry</div>
+                  </div>
+                  <button onClick={() => setNotifConfigDraft(d => d ? { ...d, warranty_enabled: !d.warranty_enabled } : d)}
+                    style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                      background: notifConfigDraft.warranty_enabled ? '#22c55e' : '#e2e8f0', position: 'relative', transition: 'background 0.2s' }}>
+                    <span style={{ position: 'absolute', top: 3, left: notifConfigDraft.warranty_enabled ? 23 : 3,
+                      width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+                {notifConfigDraft.warranty_enabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>Notify within</span>
+                    <select value={notifConfigDraft.warranty_days} onChange={e => setNotifConfigDraft(d => d ? { ...d, warranty_days: Number(e.target.value) } : d)}
+                      style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}>
+                      {[7, 14, 30, 60, 90].map(d => <option key={d} value={d}>{d} days</option>)}
+                    </select>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>of expiry</span>
+                  </div>
+                )}
+              </div>
+
+              {/* License */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>License / Subscription Expiry</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Alert when software licenses are nearing expiry</div>
+                  </div>
+                  <button onClick={() => setNotifConfigDraft(d => d ? { ...d, license_enabled: !d.license_enabled } : d)}
+                    style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                      background: notifConfigDraft.license_enabled ? '#22c55e' : '#e2e8f0', position: 'relative', transition: 'background 0.2s' }}>
+                    <span style={{ position: 'absolute', top: 3, left: notifConfigDraft.license_enabled ? 23 : 3,
+                      width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+                {notifConfigDraft.license_enabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>Notify within</span>
+                    <select value={notifConfigDraft.license_days} onChange={e => setNotifConfigDraft(d => d ? { ...d, license_days: Number(e.target.value) } : d)}
+                      style={{ padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}>
+                      {[7, 14, 30, 60, 90].map(d => <option key={d} value={d}>{d} days</option>)}
+                    </select>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>of expiry</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Overdue */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Overdue Assignments</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Alert when asset returns are past due</div>
+                  </div>
+                  <button onClick={() => setNotifConfigDraft(d => d ? { ...d, overdue_enabled: !d.overdue_enabled } : d)}
+                    style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                      background: notifConfigDraft.overdue_enabled ? '#22c55e' : '#e2e8f0', position: 'relative', transition: 'background 0.2s' }}>
+                    <span style={{ position: 'absolute', top: 3, left: notifConfigDraft.overdue_enabled ? 23 : 3,
+                      width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+                {notifConfigDraft.overdue_enabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>Alert after</span>
+                    <input
+                      type="number" min={0} max={365}
+                      value={notifConfigDraft.overdue_threshold_days}
+                      onChange={e => setNotifConfigDraft(d => d ? { ...d, overdue_threshold_days: Math.max(0, Number(e.target.value)) } : d)}
+                      style={{ width: 60, padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                    />
+                    <span style={{ fontSize: 12, color: '#64748b' }}>days past due date (0 = immediately)</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Asset Event Notifications */}
+              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 18, marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Asset Event Emails</div>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>Send email to assignee when an asset event occurs</div>
+                {([
+                  { key: 'notify_on_asset_created',  label: 'Asset Added',    desc: 'Notify all users when a new asset is added' },
+                  { key: 'notify_on_asset_assigned',  label: 'Asset Assigned', desc: 'Notify assignee when an asset is assigned to them' },
+                  { key: 'notify_on_asset_returned',  label: 'Asset Returned', desc: 'Notify assignee when an asset is marked returned' },
+                  { key: 'notify_on_asset_deleted',   label: 'Asset Deleted',  desc: 'Notify all users when an asset is removed' },
+                ] as { key: keyof NotificationConfig; label: string; desc: string }[]).map(({ key, label, desc }) => (
+                  <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{label}</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>{desc}</div>
+                    </div>
+                    <button onClick={() => setNotifConfigDraft(d => d ? { ...d, [key]: !d[key] } : d)}
+                      style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', flexShrink: 0,
+                        background: notifConfigDraft[key] ? '#22c55e' : '#e2e8f0', position: 'relative', transition: 'background 0.2s' }}>
+                      <span style={{ position: 'absolute', top: 3, left: notifConfigDraft[key] ? 23 : 3,
+                        width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Email Alert Summary */}
+              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 18, marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Scheduled Email Alerts</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>Periodic digest for warranty/license/overdue alerts</div>
+                  </div>
+                  <button onClick={() => setNotifConfigDraft(d => d ? { ...d, email_enabled: !d.email_enabled } : d)}
+                    style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                      background: notifConfigDraft.email_enabled ? '#22c55e' : '#e2e8f0', position: 'relative', transition: 'background 0.2s' }}>
+                    <span style={{ position: 'absolute', top: 3, left: notifConfigDraft.email_enabled ? 23 : 3,
+                      width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.2s' }} />
+                  </button>
+                </div>
+                {notifConfigDraft.email_enabled && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Recipients */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: '#64748b', minWidth: 70 }}>Recipients</span>
+                      <select
+                        value={notifConfigDraft.email_recipients}
+                        onChange={e => setNotifConfigDraft(d => d ? { ...d, email_recipients: e.target.value } : d)}
+                        style={{ flex: 1, padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                      >
+                        <option value="all">All Users</option>
+                        <option value="managers_and_admins">Managers &amp; Admins only</option>
+                        <option value="admins_only">Admins only</option>
+                      </select>
+                    </div>
+                    {/* Frequency */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, color: '#64748b', minWidth: 70 }}>Frequency</span>
+                      <select
+                        value={notifConfigDraft.email_frequency}
+                        onChange={e => setNotifConfigDraft(d => d ? { ...d, email_frequency: e.target.value } : d)}
+                        style={{ flex: 1, padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="on_demand">On-demand only</option>
+                      </select>
+                    </div>
+                    {/* Weekday picker (only for weekly) */}
+                    {notifConfigDraft.email_frequency === 'weekly' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, color: '#64748b', minWidth: 70 }}>Day</span>
+                        <select
+                          value={notifConfigDraft.email_weekly_day}
+                          onChange={e => setNotifConfigDraft(d => d ? { ...d, email_weekly_day: Number(e.target.value) } : d)}
+                          style={{ flex: 1, padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                        >
+                          {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day, i) => (
+                            <option key={i} value={i}>{day}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {/* Send hour (only for daily/weekly) */}
+                    {notifConfigDraft.email_frequency !== 'on_demand' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, color: '#64748b', minWidth: 70 }}>Send at</span>
+                        <select
+                          value={notifConfigDraft.email_send_hour}
+                          onChange={e => setNotifConfigDraft(d => d ? { ...d, email_send_hour: Number(e.target.value) } : d)}
+                          style={{ flex: 1, padding: '5px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                        >
+                          {Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, '0')}:00 IST</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowNotifSettings(false)}
+                  style={{ padding: '8px 18px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button disabled={notifConfigSaving} onClick={async () => {
+                  if (!notifConfigDraft) return;
+                  setNotifConfigSaving(true);
+                  try {
+                    const saved = await notificationSettingsApi.update(notifConfigDraft);
+                    setNotifConfig(saved);
+                    setNotifConfigDraft(saved);
+                    setNotifConfigSaved(true);
+                    setTimeout(() => setNotifConfigSaved(false), 3000);
+                  } catch {}
+                  setNotifConfigSaving(false);
+                }}
+                  style={{ padding: '8px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  {notifConfigSaving ? 'Saving…' : 'Save Settings'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Idle Warning Modal ── */}
       {showIdleWarn && (

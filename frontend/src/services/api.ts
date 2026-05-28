@@ -104,7 +104,7 @@ export const assetsApi = {
 
 // ─── Assignments ──────────────────────────────────────────────
 export const assignmentsApi = {
-  list: (params?: { asset_id?: string }): Promise<Assignment[]> =>
+  list: (params?: { asset_id?: string; user_id?: string }): Promise<Assignment[]> =>
     api.get('/assignments', { params }).then(r => r.data),
 
   create: (data: {
@@ -120,6 +120,12 @@ export const assignmentsApi = {
     notes?: string;
   }): Promise<Assignment> =>
     api.post('/assignments', data).then(r => r.data),
+
+  update: (assignmentId: string, data: Partial<{
+    assignee_name: string; assignee_email: string; employee_id: string;
+    designation: string; department: string; expected_return_date: string; notes: string;
+  }>): Promise<Assignment> =>
+    api.patch(`/assignments/${assignmentId}`, data).then(r => r.data),
 
   returnAsset: (assignmentId: string): Promise<void> =>
     api.post(`/assignments/${assignmentId}/return`).then(r => r.data),
@@ -182,6 +188,72 @@ export const notificationsApi = {
 
   sendAlerts: (days = 30) =>
     api.post('/notifications/send-alerts', null, { params: { days } }).then(r => r.data),
+};
+
+// ─── Subscriptions ────────────────────────────────────────────
+export interface Subscription {
+  id:               string;
+  name:             string;
+  vendor?:          string;
+  category?:        string;
+  plan_name?:       string;
+  num_licenses?:    number;
+  cost_per_license?: number;
+  billing_cycle?:   string;
+  total_cost?:      number;
+  start_date?:      string;
+  renewal_date?:    string;
+  auto_renew:       boolean;
+  status:           string;
+  notes?:           string;
+  is_active:        boolean;
+  created_at:       string;
+  updated_at?:      string;
+}
+
+export const subscriptionsApi = {
+  list: (): Promise<Subscription[]> =>
+    api.get('/subscriptions').then(r => r.data),
+
+  create: (data: Partial<Subscription>): Promise<Subscription> =>
+    api.post('/subscriptions', data).then(r => r.data),
+
+  update: (id: string, data: Partial<Subscription>): Promise<Subscription> =>
+    api.patch(`/subscriptions/${id}`, data).then(r => r.data),
+
+  delete: (id: string): Promise<void> =>
+    api.delete(`/subscriptions/${id}`).then(r => r.data),
+
+  expiring: (days = 30) =>
+    api.get('/notifications/subscriptions-expiring', { params: { days } }).then(r => r.data),
+};
+
+// ─── Notification Settings ────────────────────────────────────
+export interface NotificationConfig {
+  warranty_enabled:         boolean;
+  warranty_days:            number;
+  license_enabled:          boolean;
+  license_days:             number;
+  overdue_enabled:          boolean;
+  overdue_threshold_days:   number;
+  email_enabled:            boolean;
+  email_send_hour:          number;
+  email_send_minute:        number;
+  email_recipients:         string;
+  email_frequency:          string;
+  email_weekly_day:         number;
+  notify_on_asset_created:  boolean;
+  notify_on_asset_assigned: boolean;
+  notify_on_asset_returned: boolean;
+  notify_on_asset_deleted:  boolean;
+  updated_at?:              string;
+}
+
+export const notificationSettingsApi = {
+  get: (): Promise<NotificationConfig> =>
+    api.get('/settings/notifications').then(r => r.data),
+  update: (data: Partial<NotificationConfig>): Promise<NotificationConfig> =>
+    api.put('/settings/notifications', data).then(r => r.data),
 };
 
 // ─── Role Permissions ─────────────────────────────────────────

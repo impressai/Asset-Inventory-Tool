@@ -9,7 +9,7 @@ const badge = (color: string): React.CSSProperties => ({
 });
 
 const ROLE_COLORS: Record<string, string> = {
-  admin: '#ef4444', manager: '#f59e0b', user: '#3b82f6',
+  admin: '#ef4444', manager: '#f59e0b', user: '#3b82f6', SUBSCRIPTION_MANAGER: '#8b5cf6',
 };
 
 const glass: React.CSSProperties = {
@@ -65,10 +65,11 @@ const PERMISSIONS = [
   { key: 'import_assets', label: 'Import CSV',    description: 'Bulk import assets via CSV upload' },
   { key: 'export_assets', label: 'Export CSV',    description: 'Export asset list to CSV' },
   { key: 'view_reports',  label: 'View Reports',  description: 'Access the Reports page' },
-  { key: 'manage_users',  label: 'Manage Users',  description: 'Create and edit user accounts' },
+  { key: 'manage_users',         label: 'Manage Users',         description: 'Create and edit user accounts' },
+  { key: 'manage_subscriptions', label: 'Manage Subscriptions', description: 'Add, edit and delete subscriptions' },
 ];
-const ROLES_LIST = ['admin', 'manager', 'user'] as const;
-const ROLE_LABELS: Record<string, string> = { admin: 'Super Admin', manager: 'Admin', user: 'User' };
+const ROLES_LIST = ['admin', 'manager', 'user', 'SUBSCRIPTION_MANAGER'] as const;
+const ROLE_LABELS: Record<string, string> = { admin: 'Super Admin', manager: 'Admin', user: 'User', SUBSCRIPTION_MANAGER: 'Subscription Manager' };
 
 function DetailRow({ label, value }: { label: string; value?: string | null }) {
   return (

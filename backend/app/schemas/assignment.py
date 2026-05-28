@@ -6,6 +6,15 @@ from pydantic import BaseModel
 from app.models.models import ApprovalStatus
 
 
+class AssignmentAsset(BaseModel):
+    id: UUID
+    name: str
+    asset_tag: str
+    category: str
+
+    model_config = {"from_attributes": True}
+
+
 class AssignmentCreate(BaseModel):
     asset_id: UUID
     user_id: Optional[UUID] = None
@@ -37,5 +46,6 @@ class AssignmentResponse(BaseModel):
     is_active: bool
     notes: Optional[str] = None
     created_at: datetime
+    asset: Optional[AssignmentAsset] = None
 
     model_config = {"from_attributes": True}

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { reportsApi } from '../services/api';
+import { reportsApi, assignmentsApi } from '../services/api';
 
 const STATUS_COLORS: Record<string, string> = {
   stock: '#22c55e', assigned: '#3b82f6', faulty: '#ef4444', sold: '#94a3b8',
@@ -127,6 +127,8 @@ const s: Record<string, React.CSSProperties> = {
   noData:   { padding: '40px 24px', textAlign: 'center' as const, color: '#94a3b8', fontSize: 13 },
 };
 
+type MultiAssetUser = { emp_id: string; name: string; count: number; assets: { name: string; asset_tag: string; category: string; assignment_date: string }[] };
+
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('all');
   const [category, setCategory]     = useState('');
@@ -142,6 +144,11 @@ export default function ReportsPage() {
   const [genType, setGenType]       = useState<ReportType>('all');
   const [categories, setCategories] = useState<string[]>([]);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const [multiLoading, setMultiLoading]   = useState(false);
+  const [multiData, setMultiData]         = useState<MultiAssetUser[] | null>(null);
+  const [multiExpanded, setMultiExpanded] = useState<Record<number, boolean>>({});
+  const [multiCategory, setMultiCategory] = useState('');
 
   useEffect(() => {
     reportsApi.summary().then((s: any) => setCategories(Object.keys(s.by_category || {}))).catch(() => {});
@@ -168,6 +175,32 @@ export default function ReportsPage() {
       setGenTitle(parts.join(' — '));
     } catch { /* silently fail */ }
     finally { setLoading(false); }
+  };
+
+  const loadMultiAsset = async () => {
+    setMultiLoading(true);
+    try {
+      const all = await assignmentsApi.list();
+      const map: Record<string, MultiAssetUser> = {};
+      all.forEach((a: any) => {
+        const cat = a.asset?.category || '—';
+        // If a category filter is set, only count assets matching that category
+        if (multiCategory && cat.toLowerCase() !== multiCategory.toLowerCase()) return;
+        const key = a.employee_id || a.assignee_name || a.user_id || 'Unknown';
+        if (!map[key]) map[key] = { emp_id: a.employee_id || '—', name: a.assignee_name || '—', count: 0, assets: [] };
+        map[key].count++;
+        map[key].assets.push({
+          name: a.asset?.name || '—',
+          asset_tag: a.asset?.asset_tag || '—',
+          category: cat,
+          assignment_date: a.assignment_date,
+        });
+      });
+      const result = Object.values(map).filter(u => u.count >= 2).sort((a, b) => b.count - a.count);
+      setMultiData(result);
+      setMultiExpanded({});
+    } catch {}
+    setMultiLoading(false);
   };
 
   /* ── grouped display ── */
@@ -362,6 +395,82 @@ export default function ReportsPage() {
           )}
         </div>
       )}
+      {/* ── Multi-Asset Users ── */}
+      <div style={{ ...glass, borderRadius: 14, padding: '22px 24px', marginTop: 28 }} className="no-print">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>👥 Users with Multiple Assets</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>Employees holding 2 or more assets — optionally filtered by category</div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <select style={{ ...s.select, width: 180 }} value={multiCategory} onChange={e => { setMultiCategory(e.target.value); setMultiData(null); }}>
+              <option value="">All Categories</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button style={{ ...s.genBtn, marginTop: 0 }} onClick={loadMultiAsset} disabled={multiLoading}>
+              {multiLoading ? 'Loading…' : '▶ Generate'}
+            </button>
+          </div>
+        </div>
+
+        {multiData && (
+          multiData.length === 0 ? (
+            <div style={{ ...s.noData, background: 'rgba(255,255,255,0.7)', borderRadius: 10 }}>
+              {multiCategory
+                ? `No employees hold more than one ${multiCategory}.`
+                : 'No employees currently hold more than one asset.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>
+                {multiData.length} employee{multiData.length !== 1 ? 's' : ''}
+                {multiCategory ? ` with multiple ${multiCategory}s` : ' with multiple assets'}
+              </div>
+              {multiData.map((u, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
+                  <div
+                    style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setMultiExpanded(prev => ({ ...prev, [i]: !prev[i] }))}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>{u.emp_id !== '—' ? u.emp_id : u.name}</span>
+                      {u.emp_id !== '—' && <span style={{ fontSize: 13, color: '#64748b' }}>{u.name}</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: '#f59e0b22', color: '#f59e0b' }}>
+                        {u.count} {multiCategory || 'asset'}{u.count !== 1 ? 's' : ''}
+                      </span>
+                      <span style={{ fontSize: 12, color: '#94a3b8' }}>{multiExpanded[i] ? '▲' : '▼'}</span>
+                    </div>
+                  </div>
+                  {multiExpanded[i] && (
+                    <table style={{ ...s.table, marginBottom: 0, borderRadius: 0 }}>
+                      <thead>
+                        <tr>
+                          <th style={s.th}>Asset Name</th>
+                          <th style={s.th}>Tag</th>
+                          <th style={s.th}>Category</th>
+                          <th style={s.th}>Assigned Since</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {u.assets.map((a, j) => (
+                          <tr key={j}>
+                            <td style={s.td}>{a.name}</td>
+                            <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 700, color: '#3b82f6' }}>{a.asset_tag}</td>
+                            <td style={s.td}>{a.category}</td>
+                            <td style={s.td}>{new Date(a.assignment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }

@@ -6,12 +6,12 @@ from uuid import UUID
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager, check_permission
 from app.models.models import (
     Assignment, Asset, User, AssetStatus, ApprovalStatus,
-    AssetHistory, HistoryEventType,
+    AssetHistory, HistoryEventType, NotificationConfig,
 )
 from app.schemas.assignment import AssignmentCreate, AssignmentResponse
 from app.core.email import send_email, asset_assigned_email, asset_returned_email
@@ -22,13 +22,19 @@ router = APIRouter()
 @router.get("", response_model=list[AssignmentResponse])
 def list_assignments(
     asset_id: UUID | None = None,
+    user_id: UUID | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List active assignments. Filter by asset_id to get a single asset's history."""
-    query = db.query(Assignment)
+    """List active assignments. Filter by asset_id or user_id."""
+    query = db.query(Assignment).options(joinedload(Assignment.asset))
     if asset_id:
         query = query.filter(Assignment.asset_id == asset_id)
+    elif user_id:
+        if current_user.role.value == "user" and current_user.id != user_id:
+            query = query.filter(Assignment.user_id == current_user.id)
+        else:
+            query = query.filter(Assignment.is_active == True, Assignment.user_id == user_id)
     else:
         query = query.filter(Assignment.is_active == True)
         if current_user.role.value == "user":
@@ -98,7 +104,8 @@ def create_assignment(
     db.commit()
     db.refresh(assignment)
 
-    if assignment.assignee_email:
+    cfg = db.query(NotificationConfig).filter(NotificationConfig.id == 1).first()
+    if assignment.assignee_email and (not cfg or cfg.notify_on_asset_assigned):
         send_email(
             to_email=assignment.assignee_email,
             to_name=display_name,
@@ -115,6 +122,30 @@ def create_assignment(
             ),
         )
 
+    return assignment
+
+
+@router.patch("/{assignment_id}", response_model=AssignmentResponse)
+def update_assignment(
+    assignment_id: UUID,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_manager),
+):
+    """Update mutable fields on an active assignment (employee details, dates, notes)."""
+    assignment = db.query(Assignment).options(joinedload(Assignment.asset)).filter(
+        Assignment.id == assignment_id, Assignment.is_active == True
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Active assignment not found")
+
+    allowed = {"assignee_name", "assignee_email", "employee_id", "designation", "department", "expected_return_date", "notes"}
+    for field, value in payload.items():
+        if field in allowed:
+            setattr(assignment, field, value or None)
+
+    db.commit()
+    db.refresh(assignment)
     return assignment
 
 
@@ -183,7 +214,8 @@ def return_asset(
     db.add(history)
     db.commit()
 
-    if assignment.assignee_email:
+    cfg = db.query(NotificationConfig).filter(NotificationConfig.id == 1).first()
+    if assignment.assignee_email and (not cfg or cfg.notify_on_asset_returned):
         send_email(
             to_email=assignment.assignee_email,
             to_name=holder_name,

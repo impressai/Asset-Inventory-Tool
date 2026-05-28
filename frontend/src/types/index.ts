@@ -1,5 +1,5 @@
 // ─── Enums ────────────────────────────────────────────────────
-export type UserRole = 'admin' | 'manager' | 'user';
+export type UserRole = 'admin' | 'manager' | 'user' | 'SUBSCRIPTION_MANAGER';
 
 export type AssetCondition = 'new' | 'good' | 'damaged' | 'retired';
 export type AssetStatus = 'stock' | 'assigned' | 'faulty' | 'sold';

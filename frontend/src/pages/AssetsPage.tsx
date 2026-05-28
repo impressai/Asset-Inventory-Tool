@@ -237,6 +237,12 @@ export default function AssetsPage() {
   const [returning, setReturning]           = useState(false);
   const [statusMoving, setStatusMoving]     = useState(false);
 
+  /* edit assignment */
+  const [editAssignMode, setEditAssignMode]   = useState(false);
+  const [editAssignForm, setEditAssignForm]   = useState<Record<string, string>>({});
+  const [editAssignSaving, setEditAssignSaving] = useState(false);
+  const [editAssignError, setEditAssignError]   = useState('');
+
   /* sell form */
   const EMPTY_SALE = { sale_date: today(), buyer_name: '', buyer_email: '', buyer_contact: '', sale_price: '', sale_invoice_number: '', sale_notes: '' };
   const [saleForm, setSaleForm]   = useState<Record<string, string>>(EMPTY_SALE);
@@ -259,6 +265,7 @@ export default function AssetsPage() {
 
   /* report dropdown */
   const [reportOpen, setReportOpen] = useState(false);
+
 
   /* import modal */
   const [showImport, setShowImport]       = useState(false);
@@ -336,7 +343,7 @@ export default function AssetsPage() {
     setAssignLoading(false);
   };
 
-  const closeDetail = () => { setDetailAsset(null); setActionPanel(null); setActionsOpen(false); setEditMode(false); setConfirmDelete(false); };
+  const closeDetail = () => { setDetailAsset(null); setActionPanel(null); setActionsOpen(false); setEditMode(false); setConfirmDelete(false); setEditAssignMode(false); };
 
   const handleDelete = async () => {
     if (!detailAsset) return;
@@ -438,6 +445,40 @@ export default function AssetsPage() {
     } catch (err: any) {
       setAssignError(extractError(err, 'Failed to assign asset.'));
     } finally { setAssignSaving(false); }
+  };
+
+  /* ── edit assignment ── */
+  const openEditAssign = () => {
+    if (!activeAssignment) return;
+    setEditAssignForm({
+      assignee_name:        (activeAssignment as any).assignee_name || '',
+      assignee_email:       (activeAssignment as any).assignee_email || '',
+      employee_id:          (activeAssignment as any).employee_id || '',
+      designation:          (activeAssignment as any).designation || '',
+      department:           activeAssignment.department || '',
+      expected_return_date: activeAssignment.expected_return_date || '',
+      notes:                activeAssignment.notes || '',
+    });
+    setEditAssignError('');
+    setEditAssignMode(true);
+  };
+
+  const handleEditAssignSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeAssignment) return;
+    if (!editAssignForm.assignee_name.trim()) { setEditAssignError('Assignee name is required.'); return; }
+    setEditAssignSaving(true); setEditAssignError('');
+    try {
+      const payload: Record<string, string> = {};
+      Object.entries(editAssignForm).forEach(([k, v]) => { if ((v as string).trim()) payload[k] = (v as string).trim(); });
+      await assignmentsApi.update(activeAssignment.id, payload as any);
+      const updated = await assetsApi.get(detailAsset!.id);
+      setDetailAsset(updated);
+      await openDetail(updated);
+      setEditAssignMode(false);
+    } catch (err: any) {
+      setEditAssignError(extractError(err, 'Failed to save changes.'));
+    } finally { setEditAssignSaving(false); }
   };
 
   /* ── return asset ── */
@@ -715,7 +756,7 @@ export default function AssetsPage() {
               { label: 'Status',      col: 'status' },
               { label: 'Condition',   col: 'condition' },
               { label: 'Location',    col: 'location' },
-              { label: 'Assigned To', col: '' },
+              { label: 'Assigned To', col: 'assignee_name' },
             ] as { label: string; col: string }[]).map(({ label, col }) => (
               <th key={label} style={{ ...s.th, cursor: col ? 'pointer' : 'default', userSelect: 'none', whiteSpace: 'nowrap' }}
                 onClick={() => col && handleSort(col)}>
@@ -819,23 +860,67 @@ export default function AssetsPage() {
                 <p style={{ fontSize: 13, color: '#94a3b8' }}>Loading…</p>
               ) : activeAssignment ? (
                 <div style={{ ...s.assignBox, borderLeft: '4px solid #3b82f6' }}>
-                  <div style={s.detailGrid}>
-                    <DetailRow label="Assigned To"   value={(activeAssignment as any).assignee_name || '—'} />
-                    <DetailRow label="Employee ID"   value={(activeAssignment as any).employee_id} />
-                    <DetailRow label="Designation"   value={(activeAssignment as any).designation} />
-                    <DetailRow label="Email"         value={(activeAssignment as any).assignee_email} />
-                    <DetailRow label="Department"    value={activeAssignment.department} />
-                    <DetailRow label="Assigned On"   value={fmt(activeAssignment.assignment_date)} />
-                    <DetailRow label="Expected Back" value={fmt(activeAssignment.expected_return_date)} />
-                  </div>
-                  {activeAssignment.notes && (
-                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>{activeAssignment.notes}</div>
+                  {editAssignMode ? (
+                    <form onSubmit={handleEditAssignSave}>
+                      {editAssignError && <div style={s.errorBox}>{editAssignError}</div>}
+                      <div style={s.row2}>
+                        <div><label style={s.label}>Assignee Name *</label>
+                          <input style={s.field} value={editAssignForm.assignee_name} onChange={e => setEditAssignForm(f => ({ ...f, assignee_name: e.target.value }))} required />
+                        </div>
+                        <div><label style={s.label}>Employee ID</label>
+                          <input style={s.field} value={editAssignForm.employee_id} onChange={e => setEditAssignForm(f => ({ ...f, employee_id: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div style={s.row2}>
+                        <div><label style={s.label}>Designation</label>
+                          <input style={s.field} value={editAssignForm.designation} onChange={e => setEditAssignForm(f => ({ ...f, designation: e.target.value }))} />
+                        </div>
+                        <div><label style={s.label}>Email</label>
+                          <input style={s.field} type="email" value={editAssignForm.assignee_email} onChange={e => setEditAssignForm(f => ({ ...f, assignee_email: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div style={s.row2}>
+                        <div><label style={s.label}>Department</label>
+                          <input style={s.field} value={editAssignForm.department} onChange={e => setEditAssignForm(f => ({ ...f, department: e.target.value }))} />
+                        </div>
+                        <div><label style={s.label}>Expected Return Date</label>
+                          <input style={s.field} type="date" value={editAssignForm.expected_return_date} onChange={e => setEditAssignForm(f => ({ ...f, expected_return_date: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div><label style={s.label}>Notes</label>
+                        <input style={s.field} value={editAssignForm.notes} onChange={e => setEditAssignForm(f => ({ ...f, notes: e.target.value }))} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                        <button type="button" style={s.btnGhost} onClick={() => setEditAssignMode(false)}>Cancel</button>
+                        <button type="submit" style={s.btn} disabled={editAssignSaving}>{editAssignSaving ? 'Saving…' : 'Save Changes'}</button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <div style={s.detailGrid}>
+                          <DetailRow label="Assigned To"   value={(activeAssignment as any).assignee_name || '—'} />
+                          <DetailRow label="Employee ID"   value={(activeAssignment as any).employee_id} />
+                          <DetailRow label="Designation"   value={(activeAssignment as any).designation} />
+                          <DetailRow label="Email"         value={(activeAssignment as any).assignee_email} />
+                          <DetailRow label="Department"    value={activeAssignment.department} />
+                          <DetailRow label="Assigned On"   value={fmt(activeAssignment.assignment_date)} />
+                          <DetailRow label="Expected Back" value={fmt(activeAssignment.expected_return_date)} />
+                        </div>
+                        {canAdd && (
+                          <button style={{ ...s.btnGhost, padding: '5px 12px', fontSize: 12, flexShrink: 0 }} onClick={openEditAssign}>✎ Edit</button>
+                        )}
+                      </div>
+                      {activeAssignment.notes && (
+                        <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>{activeAssignment.notes}</div>
+                      )}
+                      <div style={{ marginTop: 14 }}>
+                        <button style={s.btnRed} disabled={returning} onClick={() => handleReturn(activeAssignment.id)}>
+                          {returning ? 'Returning…' : 'Return Asset'}
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <div style={{ marginTop: 14 }}>
-                    <button style={s.btnRed} disabled={returning} onClick={() => handleReturn(activeAssignment.id)}>
-                      {returning ? 'Returning…' : 'Return Asset'}
-                    </button>
-                  </div>
                 </div>
               ) : (
                 actionPanel === null && (
@@ -1417,6 +1502,7 @@ export default function AssetsPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

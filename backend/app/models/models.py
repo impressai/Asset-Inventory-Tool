@@ -22,6 +22,7 @@ class UserRole(str, PyEnum):
     ADMIN = "admin"
     MANAGER = "manager"
     USER = "user"
+    SUBSCRIPTION_MANAGER = "SUBSCRIPTION_MANAGER"
 
 
 class AssetCondition(str, PyEnum):
@@ -214,6 +215,7 @@ PERMISSION_KEYS = [
     "export_assets",
     "view_reports",
     "manage_users",
+    "manage_subscriptions",
 ]
 
 class RolePermission(Base):
@@ -226,3 +228,49 @@ class RolePermission(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     __table_args__ = (UniqueConstraint("role", "permission", name="uq_role_permission"),)
+
+
+# ─── Subscription ─────────────────────────────────────────────
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name             = Column(String(255), nullable=False)
+    vendor           = Column(String(255), nullable=True)
+    category         = Column(String(100), nullable=True)
+    plan_name        = Column(String(100), nullable=True)
+    num_licenses     = Column(Integer,  nullable=True)
+    cost_per_license = Column(Float,    nullable=True)
+    billing_cycle    = Column(String(50), nullable=True)   # monthly / annually / quarterly / one-time
+    total_cost       = Column(Float,    nullable=True)
+    start_date       = Column(Date,     nullable=True)
+    renewal_date     = Column(Date,     nullable=True)     # used for expiry notifications
+    auto_renew       = Column(Boolean,  default=False)
+    status           = Column(String(50), nullable=False, default='active')  # active/expired/cancelled/paused
+    notes            = Column(Text,     nullable=True)
+    is_active        = Column(Boolean,  default=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class NotificationConfig(Base):
+    __tablename__ = "notification_config"
+
+    id                       = Column(Integer, primary_key=True, default=1)
+    warranty_enabled         = Column(Boolean, nullable=False, default=True)
+    warranty_days            = Column(Integer, nullable=False, default=30)
+    license_enabled          = Column(Boolean, nullable=False, default=True)
+    license_days             = Column(Integer, nullable=False, default=30)
+    overdue_enabled          = Column(Boolean, nullable=False, default=True)
+    overdue_threshold_days   = Column(Integer, nullable=False, default=0)
+    email_enabled            = Column(Boolean, nullable=False, default=True)
+    email_send_hour          = Column(Integer, nullable=False, default=20)
+    email_send_minute        = Column(Integer, nullable=False, default=0)
+    email_recipients         = Column(String(50), nullable=False, default='all')
+    email_frequency          = Column(String(20), nullable=False, default='daily')
+    email_weekly_day         = Column(Integer, nullable=False, default=0)
+    notify_on_asset_created  = Column(Boolean, nullable=False, default=True)
+    notify_on_asset_assigned = Column(Boolean, nullable=False, default=True)
+    notify_on_asset_returned = Column(Boolean, nullable=False, default=True)
+    notify_on_asset_deleted  = Column(Boolean, nullable=False, default=True)
+    updated_at               = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

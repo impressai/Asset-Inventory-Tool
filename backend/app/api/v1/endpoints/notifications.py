@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from app.api.v1.deps import get_db, get_current_user
-from app.models.models import Asset, Assignment, User
+from app.models.models import Asset, Assignment, User, Subscription
 from app.core.email import send_email, notification_alert_email
 
 router = APIRouter()
@@ -69,6 +69,37 @@ def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(get_
             "days_overdue":        (today - a.expected_return_date).days,
         })
     return {"count": len(result), "assignments": result}
+
+
+@router.get("/subscriptions-expiring")
+def subscriptions_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Subscriptions whose renewal_date is within ±N days of today."""
+    today = date.today()
+    lookback  = today - timedelta(days=days)
+    threshold = today + timedelta(days=days)
+    subs = db.query(Subscription).filter(
+        Subscription.renewal_date != None,
+        Subscription.renewal_date >= lookback,
+        Subscription.renewal_date <= threshold,
+        Subscription.is_active == True,
+        Subscription.status == 'active',
+    ).order_by(Subscription.renewal_date).all()
+    result = [
+        {
+            "id":             str(s.id),
+            "name":           s.name,
+            "vendor":         s.vendor,
+            "category":       s.category,
+            "num_licenses":   s.num_licenses,
+            "cost_per_license": s.cost_per_license,
+            "total_cost":     s.total_cost,
+            "renewal_date":   str(s.renewal_date),
+            "days_left":      (s.renewal_date - today).days,
+            "billing_cycle":  s.billing_cycle,
+        }
+        for s in subs
+    ]
+    return {"expiring_within_days": days, "count": len(result), "subscriptions": result}
 
 
 @router.post("/send-alerts")

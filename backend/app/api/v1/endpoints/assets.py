@@ -12,11 +12,19 @@ from sqlalchemy.orm import Session, subqueryload
 from sqlalchemy import func, asc, desc
 
 from app.api.v1.deps import get_db, get_current_user, require_admin, require_admin_or_manager, check_permission
-from app.models.models import Asset, AssetStatus, AssetCondition, User, Purchase, AssetHistory, HistoryEventType, Assignment
+from app.models.models import Asset, AssetStatus, AssetCondition, User, Purchase, AssetHistory, HistoryEventType, Assignment, NotificationConfig
 from app.schemas.asset import AssetCreate, AssetUpdate, AssetResponse, AssetListResponse
 from app.core.email import send_email, asset_added_email, asset_deleted_email
 
 router = APIRouter()
+
+
+def _get_notif_cfg(db: Session) -> NotificationConfig:
+    cfg = db.query(NotificationConfig).filter(NotificationConfig.id == 1).first()
+    if not cfg:
+        cfg = NotificationConfig(id=1)
+        db.add(cfg); db.commit(); db.refresh(cfg)
+    return cfg
 
 
 def _notify_all_users(db: Session, subject: str, html_body_fn):
@@ -89,7 +97,18 @@ def list_assets(
         'status': Asset.status, 'condition': Asset.condition, 'location': Asset.location,
         'asset_tag': Asset.asset_tag, 'created_at': Asset.created_at,
     }
-    sort_col = SORTABLE.get(sort_by or '', Asset.created_at)
+
+    if sort_by == 'assignee_name':
+        from sqlalchemy.orm import aliased
+        active_assign = aliased(Assignment)
+        query = query.outerjoin(
+            active_assign,
+            (active_assign.asset_id == Asset.id) & (active_assign.is_active == True)
+        )
+        sort_col = active_assign.assignee_name
+    else:
+        sort_col = SORTABLE.get(sort_by or '', Asset.created_at)
+
     query = query.order_by(desc(sort_col) if sort_dir == 'desc' else asc(sort_col))
 
     total = query.count()
@@ -120,8 +139,9 @@ def create_asset(
         db.add(history)
         db.commit()
         db.refresh(asset)
-        _notify_all_users(db, f"New Asset Added: {asset.name} ({asset.asset_tag})",
-            lambda name: asset_added_email(name, asset.name, asset.asset_tag, asset.category, asset.brand, current_user.full_name))
+        if _get_notif_cfg(db).notify_on_asset_created:
+            _notify_all_users(db, f"New Asset Added: {asset.name} ({asset.asset_tag})",
+                lambda name: asset_added_email(name, asset.name, asset.asset_tag, asset.category, asset.brand, current_user.full_name))
         return asset
     except IntegrityError as e:
         db.rollback()
@@ -207,8 +227,9 @@ def delete_asset(
     )
     db.add(history)
     db.commit()
-    _notify_all_users(db, f"Asset Removed: {asset.name} ({asset.asset_tag})",
-        lambda name: asset_deleted_email(name, asset.name, asset.asset_tag, asset.category, current_user.full_name))
+    if _get_notif_cfg(db).notify_on_asset_deleted:
+        _notify_all_users(db, f"Asset Removed: {asset.name} ({asset.asset_tag})",
+            lambda name: asset_deleted_email(name, asset.name, asset.asset_tag, asset.category, current_user.full_name))
 
 
 @router.post("/bulk", status_code=status.HTTP_201_CREATED)
