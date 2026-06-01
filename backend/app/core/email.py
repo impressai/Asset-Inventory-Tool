@@ -160,6 +160,113 @@ def asset_returned_email(
     """)
 
 
+def clearance_email(
+    employee_name: str,
+    employee_id: str | None,
+    department: str | None,
+    designation: str | None,
+    current_assets: list,
+    history_assets: list,
+    note: str | None,
+    generated_by: str,
+    clearance_date: str,
+) -> str:
+    def _asset_rows(assets: list) -> str:
+        rows = ""
+        for a in assets:
+            brand_model = " / ".join(filter(None, [a.get("brand"), a.get("model_number")])) or "—"
+            rows += (
+                f"<tr>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0;font-family:monospace;font-size:12px'>{a.get('asset_tag','—')}</td>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0'>{a.get('name','—')}</td>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0'>{a.get('category','—')}</td>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0'>{brand_model}</td>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0'>{a.get('assignment_date','—')}</td>"
+                f"<td style='padding:8px 10px;border:1px solid #e2e8f0'>{a.get('return_date') or clearance_date}</td>"
+                f"</tr>"
+            )
+        return rows
+
+    def _table(rows_html: str) -> str:
+        return f"""
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px">
+          <thead><tr style="background:#f8fafc">
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Tag</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Asset Name</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Category</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Brand / Model</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Assigned</th>
+            <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;color:#64748b">Returned</th>
+          </tr></thead>
+          <tbody>{rows_html}</tbody>
+        </table>"""
+
+    meta_rows = "".join([
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151;width:150px'>Employee Name</td><td style='padding:6px 10px;color:#0f172a'>{employee_name}</td></tr>",
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151'>Employee ID</td><td style='padding:6px 10px;color:#0f172a'>{employee_id or '—'}</td></tr>",
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151'>Department</td><td style='padding:6px 10px;color:#0f172a'>{department or '—'}</td></tr>",
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151'>Designation</td><td style='padding:6px 10px;color:#0f172a'>{designation or '—'}</td></tr>",
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151'>Clearance Date</td><td style='padding:6px 10px;color:#0f172a'>{clearance_date}</td></tr>",
+        f"<tr><td style='padding:6px 10px;font-weight:600;color:#374151'>Issued By</td><td style='padding:6px 10px;color:#0f172a'>{generated_by}</td></tr>",
+    ])
+
+    if not current_assets:
+        clearance_banner = f"""
+        <div style="border:2px solid #166534;border-radius:6px;padding:14px 18px;background:#f0fdf4;margin:16px 0;text-align:center">
+          <div style="font-size:15px;font-weight:700;color:#166534;margin-bottom:6px">✓ CLEARED FOR EXIT</div>
+          <div style="font-size:13px;color:#166534;line-height:1.6">
+            This is to certify that <strong>{employee_name}</strong> has returned all company assets
+            in their possession. All items have been duly accounted for and verified. This employee is
+            formally cleared of any outstanding asset obligations and is approved for offboarding.
+          </div>
+        </div>"""
+    else:
+        clearance_banner = f"""
+        <div style="border:2px solid #b91c1c;border-radius:6px;padding:12px 16px;background:#fef2f2;margin:16px 0;text-align:center">
+          <div style="font-size:13px;font-weight:700;color:#b91c1c">
+            ⚠ PENDING — {len(current_assets)} asset{"s" if len(current_assets) != 1 else ""} yet to be returned
+          </div>
+        </div>"""
+
+    current_section = ""
+    if current_assets:
+        current_section = f"""
+        <h4 style="margin:24px 0 6px;color:#dc2626">Assets Pending Return ({len(current_assets)})</h4>
+        {_table(_asset_rows(current_assets))}"""
+
+    history_section = ""
+    if history_assets:
+        history_section = f"""
+        <h4 style="margin:24px 0 6px;color:#0f172a">Previously Returned Assets ({len(history_assets)})</h4>
+        {_table(_asset_rows(history_assets))}"""
+
+    note_section = ""
+    if note:
+        note_section = f"""
+        <div style="margin-top:20px;padding:12px 16px;background:#fef9c3;border-left:4px solid #eab308;border-radius:4px;font-size:13px;color:#713f12">
+          <strong>Note:</strong> {note}
+        </div>"""
+
+    return _base_html(f"""
+      <div style="background:#0f172a;color:#fff;padding:14px 20px;border-radius:8px 8px 0 0;margin-bottom:0">
+        <h3 style="margin:0;font-size:16px;letter-spacing:0.02em">ASSET CLEARANCE CERTIFICATE</h3>
+        <div style="font-size:12px;color:#94a3b8;margin-top:3px">Employee Exit Clearance — Asset Inventory</div>
+      </div>
+      <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;padding:20px;margin-bottom:20px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;background:#f8fafc;border-radius:6px;overflow:hidden">
+          <tbody>{meta_rows}</tbody>
+        </table>
+        {clearance_banner}
+        {current_section}
+        {history_section}
+        {note_section}
+      </div>
+      <p style="font-size:12px;color:#94a3b8;margin-top:8px">
+        This clearance certificate was generated by <strong>{generated_by}</strong> on {clearance_date}.
+      </p>
+    """)
+
+
 def notification_alert_email(full_name: str, warranty_items: list, license_items: list, overdue_items: list) -> str:
     sections = ""
 

@@ -14,6 +14,7 @@ import PurchasesPage from './pages/PurchasesPage';
 import ReportsPage from './pages/ReportsPage';
 import UsersPage from './pages/UsersPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
+import BoardingPage from './pages/BoardingPage';
 
 export default function App() {
   const { initAuth } = useAuthStore();
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/subscriptions" element={<SubscriptionsPage />} />
+            <Route path="/boarding" element={<BoardingPage />} />
           </Route>
         </Route>
 

@@ -104,7 +104,13 @@ export const assetsApi = {
 
 // ─── Assignments ──────────────────────────────────────────────
 export const assignmentsApi = {
-  list: (params?: { asset_id?: string; user_id?: string }): Promise<Assignment[]> =>
+  list: (params?: {
+    asset_id?: string;
+    user_id?: string;
+    employee_id?: string;
+    assignee_search?: string;
+    include_inactive?: boolean;
+  }): Promise<Assignment[]> =>
     api.get('/assignments', { params }).then(r => r.data),
 
   create: (data: {
@@ -129,6 +135,22 @@ export const assignmentsApi = {
 
   returnAsset: (assignmentId: string): Promise<void> =>
     api.post(`/assignments/${assignmentId}/return`).then(r => r.data),
+
+  bulkReturn: (assignmentIds: string[]): Promise<{ returned: number; failed: number; failed_ids: string[] }> =>
+    api.post('/assignments/bulk-return', { assignment_ids: assignmentIds }).then(r => r.data),
+
+  sendClearanceEmail: (data: {
+    employee_name: string;
+    employee_id?: string;
+    department?: string;
+    designation?: string;
+    employee_email?: string;
+    manager_emails?: string[];
+    current_assets: object[];
+    history_assets: object[];
+    note?: string;
+  }): Promise<{ sent: string[]; failed: string[] }> =>
+    api.post('/assignments/send-clearance-email', data).then(r => r.data),
 };
 
 // ─── Purchases ────────────────────────────────────────────────

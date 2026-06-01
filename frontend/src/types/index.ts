@@ -74,10 +74,20 @@ export interface Purchase {
 }
 
 // ─── Assignment ───────────────────────────────────────────────
+export interface AssignmentAsset {
+  id: string;
+  name: string;
+  asset_tag: string;
+  category: string;
+  brand?: string;
+  model_number?: string;
+  serial_number?: string;
+}
+
 export interface Assignment {
   id: string;
   asset_id: string;
-  asset?: Asset;
+  asset?: AssignmentAsset;
   user_id: string;
   assigned_user?: User;
   assignee_name?: string;

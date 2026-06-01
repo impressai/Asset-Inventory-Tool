@@ -4,8 +4,10 @@ Assignments Endpoints — assign/unassign assets, approval flow
 
 from uuid import UUID
 from datetime import date
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager, check_permission
@@ -14,7 +16,7 @@ from app.models.models import (
     AssetHistory, HistoryEventType, NotificationConfig,
 )
 from app.schemas.assignment import AssignmentCreate, AssignmentResponse
-from app.core.email import send_email, asset_assigned_email, asset_returned_email
+from app.core.email import send_email, asset_assigned_email, asset_returned_email, clearance_email
 
 router = APIRouter()
 
@@ -23,22 +25,45 @@ router = APIRouter()
 def list_assignments(
     asset_id: UUID | None = None,
     user_id: UUID | None = None,
+    employee_id: str | None = None,
+    assignee_search: str | None = None,
+    include_inactive: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List active assignments. Filter by asset_id or user_id."""
+    """List assignments. Filter by asset_id, user_id, employee_id, or assignee_search."""
     query = db.query(Assignment).options(joinedload(Assignment.asset))
+
+    if not include_inactive:
+        query = query.filter(Assignment.is_active == True)
+
     if asset_id:
         query = query.filter(Assignment.asset_id == asset_id)
-    elif user_id:
+
+    if user_id:
         if current_user.role.value == "user" and current_user.id != user_id:
             query = query.filter(Assignment.user_id == current_user.id)
         else:
-            query = query.filter(Assignment.is_active == True, Assignment.user_id == user_id)
-    else:
-        query = query.filter(Assignment.is_active == True)
+            query = query.filter(Assignment.user_id == user_id)
+
+    if employee_id:
+        query = query.filter(Assignment.employee_id == employee_id)
+
+    if assignee_search:
+        term = f"%{assignee_search}%"
+        query = query.filter(
+            or_(
+                Assignment.assignee_name.ilike(term),
+                Assignment.employee_id.ilike(term),
+                Assignment.assignee_email.ilike(term),
+            )
+        )
+
+    # Fallback: regular users see only their own assignments when no specific filter
+    if not asset_id and not user_id and not employee_id and not assignee_search:
         if current_user.role.value == "user":
             query = query.filter(Assignment.user_id == current_user.id)
+
     return query.order_by(Assignment.created_at.desc()).all()
 
 
@@ -230,3 +255,121 @@ def return_asset(
         )
 
     return {"message": "Asset returned successfully"}
+
+
+@router.post("/bulk-return")
+def bulk_return_assets(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(check_permission("return_asset")),
+):
+    """Return multiple assets at once (offboarding). Expects {assignment_ids: [uuid, ...]}."""
+    raw_ids = payload.get("assignment_ids", [])
+    returned_count = 0
+    failed_ids: List[str] = []
+
+    for raw_id in raw_ids:
+        try:
+            aid = UUID(str(raw_id))
+        except (ValueError, AttributeError):
+            failed_ids.append(str(raw_id))
+            continue
+
+        assignment = db.query(Assignment).options(joinedload(Assignment.asset)).filter(
+            Assignment.id == aid, Assignment.is_active == True
+        ).first()
+        if not assignment:
+            failed_ids.append(str(raw_id))
+            continue
+
+        return_date = date.today()
+        holder_name = assignment.assignee_name or "Unknown"
+
+        parts = [f"Bulk return (offboarding). Held by: {holder_name}"]
+        if assignment.department:
+            parts.append(f"Department: {assignment.department}")
+        parts.append(f"Assigned on: {assignment.assignment_date}")
+        parts.append(f"Returned on: {return_date}")
+
+        snapshot = {
+            "assignee_name":        assignment.assignee_name,
+            "assignee_email":       assignment.assignee_email,
+            "employee_id":          assignment.employee_id,
+            "designation":          assignment.designation,
+            "department":           assignment.department,
+            "assignment_date":      str(assignment.assignment_date),
+            "return_date":          str(return_date),
+            "expected_return_date": str(assignment.expected_return_date) if assignment.expected_return_date else None,
+            "notes":                assignment.notes,
+            "returned_by":          current_user.full_name,
+        }
+
+        assignment.is_active = False
+        assignment.return_date = return_date
+        if assignment.asset:
+            assignment.asset.status = AssetStatus.STOCK
+
+        history = AssetHistory(
+            asset_id=assignment.asset_id,
+            event_type=HistoryEventType.UNASSIGNED,
+            description=" | ".join(parts),
+            changed_fields={"return_snapshot": snapshot},
+            performed_by=current_user.id,
+        )
+        db.add(history)
+        returned_count += 1
+
+    db.commit()
+    return {"returned": returned_count, "failed": len(failed_ids), "failed_ids": failed_ids}
+
+
+@router.post("/send-clearance-email")
+def send_clearance_email_endpoint(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_manager),
+):
+    """Email an asset clearance certificate to an employee and/or manager."""
+    from datetime import datetime
+
+    employee_email = (payload.get("employee_email") or "").strip()
+    # Accept a list of manager emails; also support legacy single field
+    manager_emails: List[str] = [
+        e.strip() for e in (payload.get("manager_emails") or [])
+        if isinstance(e, str) and e.strip()
+    ]
+    if not manager_emails and payload.get("manager_email"):
+        manager_emails = [payload["manager_email"].strip()]
+
+    if not employee_email and not manager_emails:
+        raise HTTPException(status_code=422, detail="At least one recipient email is required")
+
+    clearance_date = datetime.today().strftime("%d %B %Y")
+
+    html = clearance_email(
+        employee_name=payload.get("employee_name", "Employee"),
+        employee_id=payload.get("employee_id"),
+        department=payload.get("department"),
+        designation=payload.get("designation"),
+        current_assets=payload.get("current_assets", []),
+        history_assets=payload.get("history_assets", []),
+        note=payload.get("note"),
+        generated_by=current_user.full_name,
+        clearance_date=clearance_date,
+    )
+
+    subject = f"Asset Clearance Certificate — {payload.get('employee_name', 'Employee')}"
+    sent, failed = [], []
+
+    if employee_email:
+        ok = send_email(to_email=employee_email, to_name=payload.get("employee_name", "Employee"), subject=subject, html_body=html)
+        (sent if ok else failed).append(employee_email)
+
+    for mgr_email in manager_emails:
+        ok = send_email(to_email=mgr_email, to_name="Manager / HR", subject=subject, html_body=html)
+        (sent if ok else failed).append(mgr_email)
+
+    if not sent:
+        raise HTTPException(status_code=500, detail="Email delivery failed — check SMTP settings")
+
+    return {"sent": sent, "failed": failed}

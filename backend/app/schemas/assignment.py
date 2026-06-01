@@ -11,6 +11,9 @@ class AssignmentAsset(BaseModel):
     name: str
     asset_tag: str
     category: str
+    brand: Optional[str] = None
+    model_number: Optional[str] = None
+    serial_number: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

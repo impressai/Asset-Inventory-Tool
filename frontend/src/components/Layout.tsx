@@ -7,6 +7,7 @@ const staticNavItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/purchases', label: 'Purchases' },
   { to: '/subscriptions', label: 'Subscriptions' },
+  { to: '/boarding', label: 'Boarding' },
   { to: '/reports', label: 'Reports' },
 ];
 
