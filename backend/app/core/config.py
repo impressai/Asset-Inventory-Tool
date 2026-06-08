@@ -2,9 +2,32 @@
 Application configuration — reads from environment variables / .env file.
 """
 
-from typing import Any, List
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+import json
+from typing import Any, List, Type
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, EnvSettingsSource
+
+
+class _SafeEnvSource(EnvSettingsSource):
+    """Handles empty or comma-separated env vars for List[str] fields.
+
+    pydantic-settings calls json.loads() on complex fields before any
+    field_validator runs, so an empty string crashes at import time.
+    This source returns None for empty strings (field default takes over)
+    and converts comma-separated values to a JSON array before handing
+    off to the normal parser.
+    """
+
+    def prepare_field_value(
+        self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
+    ) -> Any:
+        if value_is_complex and isinstance(value, str):
+            v = value.strip()
+            if not v:
+                return None
+            if not v.startswith(("[", "{")):
+                return json.dumps([p.strip() for p in v.split(",") if p.strip()])
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
 
 
 class Settings(BaseSettings):
@@ -64,16 +87,16 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 
-    @field_validator("ALLOWED_ORIGINS", "ALLOWED_HOSTS", "ALLOWED_UPLOAD_TYPES", mode="before")
     @classmethod
-    def _parse_list(cls, v: Any) -> Any:
-        if isinstance(v, str):
-            v = v.strip()
-            if v.startswith("["):
-                import json
-                return json.loads(v)
-            return [item.strip() for item in v.split(",") if item.strip()]
-        return v
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        secrets_settings,
+    ):
+        return (init_settings, _SafeEnvSource(settings_cls), dotenv_settings, secrets_settings)
 
     model_config = {"env_file": ".env", "case_sensitive": True}
 
