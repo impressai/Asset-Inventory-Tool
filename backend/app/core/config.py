@@ -95,6 +95,7 @@ class Settings(BaseSettings):
         env_settings,
         dotenv_settings,
         secrets_settings,
+        **kwargs,
     ):
         return (init_settings, _SafeEnvSource(settings_cls), dotenv_settings, secrets_settings)
 
