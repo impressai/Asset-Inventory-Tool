@@ -18,6 +18,18 @@ class _SafeEnvSource(EnvSettingsSource):
     off to the normal parser.
     """
 
+    def decode_complex_value(self, field_name: str, field: FieldInfo, value: Any) -> Any:
+        if isinstance(value, str):
+            v = value.strip()
+            if not v:
+                return None
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                parts = [p.strip() for p in v.split(",") if p.strip()]
+                return parts or None
+        return super().decode_complex_value(field_name, field, value)
+
     def prepare_field_value(
         self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
     ) -> Any:
