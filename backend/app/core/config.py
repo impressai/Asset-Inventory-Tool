@@ -2,7 +2,8 @@
 Application configuration — reads from environment variables / .env file.
 """
 
-from typing import List
+from typing import Any, List
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -62,6 +63,17 @@ class Settings(BaseSettings):
     # ── Pagination ────────────────────────────────────────────
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
+
+    @field_validator("ALLOWED_ORIGINS", "ALLOWED_HOSTS", "ALLOWED_UPLOAD_TYPES", mode="before")
+    @classmethod
+    def _parse_list(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
     model_config = {"env_file": ".env", "case_sensitive": True}
 
