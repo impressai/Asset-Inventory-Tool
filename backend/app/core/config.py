@@ -91,13 +91,18 @@ class Settings(BaseSettings):
     def settings_customise_sources(
         cls,
         settings_cls: Type[BaseSettings],
-        init_settings,
-        env_settings,
-        dotenv_settings,
-        secrets_settings,
+        init_settings=None,
+        env_settings=None,
+        dotenv_settings=None,
+        secrets_settings=None,
+        file_secret_settings=None,
         **kwargs,
     ):
-        return (init_settings, _SafeEnvSource(settings_cls), dotenv_settings, secrets_settings)
+        extra = file_secret_settings or secrets_settings
+        return tuple(
+            s for s in [init_settings, _SafeEnvSource(settings_cls), dotenv_settings, extra]
+            if s is not None
+        )
 
     model_config = {"env_file": ".env", "case_sensitive": True}
 
