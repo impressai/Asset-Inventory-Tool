@@ -25,8 +25,11 @@ class _SafeEnvSource(EnvSettingsSource):
             v = value.strip()
             if not v:
                 return None
-            if not v.startswith(("[", "{")):
-                return json.dumps([p.strip() for p in v.split(",") if p.strip()])
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                parts = [p.strip() for p in v.split(",") if p.strip()]
+                return parts or None
         return super().prepare_field_value(field_name, field, value, value_is_complex)
 
 
