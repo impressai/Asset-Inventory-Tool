@@ -6,14 +6,17 @@ MAX_RETRIES=30
 COUNT=0
 until python -c "
 import sys, os
+url = os.environ.get('DATABASE_URL', '')
+host = url.split('@')[-1].split('/')[0] if '@' in url else '(not set)'
+print('==> Connecting to:', host, flush=True)
 from sqlalchemy import create_engine, text
 try:
-    e = create_engine(os.environ['DATABASE_URL'])
+    e = create_engine(url)
     with e.connect() as c:
         c.execute(text('SELECT 1'))
     sys.exit(0)
 except Exception as ex:
-    print(ex, file=sys.stderr)
+    print('==> DB error:', ex, flush=True)
     sys.exit(1)
 "; do
     COUNT=$((COUNT + 1))
