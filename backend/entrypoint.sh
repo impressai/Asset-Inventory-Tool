@@ -15,7 +15,7 @@ try:
 except Exception as ex:
     print(ex, file=sys.stderr)
     sys.exit(1)
-" 2>/dev/null; do
+"; do
     COUNT=$((COUNT + 1))
     if [ "$COUNT" -ge "$MAX_RETRIES" ]; then
         echo "==> Database not reachable after ${MAX_RETRIES} attempts. Aborting."
