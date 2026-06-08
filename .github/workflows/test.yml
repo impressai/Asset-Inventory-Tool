@@ -1,0 +1,265 @@
+name: Test & Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    working-directory: backend
+
+# ─── SAST ─────────────────────────────────────────────────────────────────────
+jobs:
+  sast:
+    name: SAST (Bandit + Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install SAST tools
+        run: pip install bandit[toml] ruff
+
+      - name: Run Bandit — security linter
+        run: |
+          bandit -r app \
+            -c pyproject.toml \
+            --severity-level medium \
+            --confidence-level medium \
+            -f json -o bandit-report.json || true
+          bandit -r app \
+            -c pyproject.toml \
+            --severity-level high \
+            --confidence-level high
+        # Fail only on HIGH severity/confidence; report medium findings
+
+      - name: Run Ruff — code quality linter
+        run: ruff check app --output-format=github
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: backend/bandit-report.json
+
+# ─── Unit tests ───────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    env:
+      # Minimal env so app.core.config can be imported
+      SECRET_KEY: unit-test-secret-key-not-used-in-production
+      DATABASE_URL: sqlite:///./unit_test.db
+      POSTGRES_PASSWORD: unused
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit \
+            -v --tb=short \
+            --cov=app/core/security \
+            --cov=app/api/v1/endpoints/auth \
+            --cov-report=xml:coverage-unit.xml \
+            --cov-report=term-missing
+
+      - name: Upload unit coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: backend/coverage-unit.xml
+
+# ─── Integration tests ────────────────────────────────────────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: asset_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      TEST_DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/asset_test
+      DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/asset_test
+      SECRET_KEY: integration-test-secret-key-ci-only
+      POSTGRES_PASSWORD: test_pass
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      EMAILS_FROM_EMAIL: noreply@ci.test
+      APP_ENV: development
+      LOCAL_UPLOAD_DIR: /tmp/test-uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-cov httpx
+
+      - name: Create upload directory
+        run: mkdir -p /tmp/test-uploads
+
+      - name: Run Alembic migrations on test DB
+        run: alembic upgrade head
+
+      - name: Run integration tests with coverage
+        run: |
+          pytest tests/integration \
+            -v --tb=short \
+            --cov=app \
+            --cov-report=xml:coverage-integration.xml \
+            --cov-report=term-missing
+
+      - name: Upload integration coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: backend/coverage-integration.xml
+
+# ─── DAST (OWASP ZAP) ─────────────────────────────────────────────────────────
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]  # only run DAST after tests pass
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: dast_user
+          POSTGRES_PASSWORD: dast_pass
+          POSTGRES_DB: asset_dast
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://dast_user:dast_pass@localhost:5432/asset_dast
+      SECRET_KEY: dast-test-secret-key-ci-only
+      POSTGRES_PASSWORD: dast_pass
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      EMAILS_FROM_EMAIL: noreply@ci.test
+      APP_ENV: development
+      LOCAL_UPLOAD_DIR: /tmp/dast-uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare database and start app
+        run: |
+          mkdir -p /tmp/dast-uploads
+          alembic upgrade head
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          # Wait until the health endpoint responds
+          timeout 30 bash -c 'until curl -sf http://localhost:8000/health; do sleep 2; done'
+        working-directory: backend
+
+      - name: Discover host IP for Docker container
+        run: echo "HOST_IP=$(ip route show default | awk '/default/ {print $3}')" >> $GITHUB_ENV
+
+      - name: Run OWASP ZAP API scan
+        uses: zaproxy/action-api-scan@v0.9.0
+        with:
+          target: "http://${{ env.HOST_IP }}:8000/openapi.json"
+          format: openapi
+          fail_action: false           # report findings; don't break build on first run
+          allow_issue_writing: false
+          cmd_options: >
+            -config rules.cookie.ignorelist=sessionid
+            -config rules.csrf.ignorelist=/api/v1/auth/login
+        continue-on-error: true       # remove once ZAP baseline is tuned
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+
+# ─── Coverage merge + gate ────────────────────────────────────────────────────
+  coverage-gate:
+    name: Coverage Gate
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download unit coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage/
+
+      - name: Download integration coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install coverage tools
+        run: pip install coverage[toml]
+
+      - name: Merge coverage reports
+        working-directory: coverage
+        run: |
+          pip install coverage
+          coverage combine coverage-unit.xml coverage-integration.xml 2>/dev/null || true
+          echo "Coverage reports available for review"
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/coverage-unit.xml,coverage/coverage-integration.xml
+          fail_ci_if_error: false
+        continue-on-error: true

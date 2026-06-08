@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { subscriptionsApi, Subscription } from '../services/api';
+import { subscriptionsApi, Subscription, extractApiError } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 
 const BILLING_CYCLES = ['monthly', 'quarterly', 'annually', 'one-time'];
@@ -13,9 +13,9 @@ function daysUntil(d?: string | null): number | null {
 
 function daysColor(n: number | null): string {
   if (n === null) return '#94a3b8';
-  if (n < 0)   return '#ef4444';
-  if (n <= 14) return '#ef4444';
-  if (n <= 30) return '#f59e0b';
+  if (n <= 0)   return '#ef4444';
+  if (n <= 14)  return '#ef4444';
+  if (n <= 30)  return '#f59e0b';
   return '#22c55e';
 }
 
@@ -32,10 +32,48 @@ function statusBadge(status: string): React.CSSProperties {
 const fmtCost = (n?: number | null) =>
   n != null ? n.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—';
 
+/** Returns available licenses, computing it from num_licenses - licenses_used if the server didn't send it */
+function getAvailable(sub: Subscription): number | null {
+  if (sub.num_licenses == null) return null;
+  if (sub.licenses_available != null) return sub.licenses_available;
+  return Math.max(0, sub.num_licenses - (sub.licenses_used ?? 0));
+}
+
+/** Usage bar colours: green → amber → red */
+function usageColor(pct: number) {
+  if (pct >= 100) return '#ef4444';
+  if (pct >= 80)  return '#f59e0b';
+  return '#22c55e';
+}
+
+// ─── License usage bar ───────────────────────────────────────────────────────
+function LicenseBar({ sub }: { sub: Subscription }) {
+  if (sub.num_licenses == null) return <span style={{ color: '#94a3b8' }}>—</span>;
+  const used      = sub.licenses_used ?? 0;
+  const total     = sub.num_licenses;
+  const available = Math.max(0, total - used);
+  const pct       = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  const color     = usageColor(pct);
+
+  return (
+    <div style={{ minWidth: 100 }}>
+      {/* numbers */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+        <span style={{ fontWeight: 700, color: '#0f172a' }}>{available} left</span>
+        <span style={{ color: '#94a3b8' }}>{used}/{total}</span>
+      </div>
+      {/* bar */}
+      <div style={{ height: 5, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.3s' }} />
+      </div>
+    </div>
+  );
+}
+
 const EMPTY: Partial<Subscription> = {
   name: '', vendor: '', category: '', plan_name: '', num_licenses: undefined,
-  cost_per_license: undefined, billing_cycle: 'annually', total_cost: undefined,
-  start_date: '', renewal_date: '', auto_renew: false, status: 'active', notes: '',
+  licenses_used: 0, cost_per_license: undefined, billing_cycle: 'annually',
+  total_cost: undefined, start_date: '', renewal_date: '', auto_renew: false, status: 'active', notes: '',
 };
 
 export default function SubscriptionsPage() {
@@ -46,25 +84,30 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
 
-  // filters
   const [search, setSearch]           = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterCat, setFilterCat]     = useState('');
 
-  // modal
-  const [showModal, setShowModal]     = useState(false);
-  const [editing, setEditing]         = useState<Subscription | null>(null);
-  const [form, setForm]               = useState<Partial<Subscription>>(EMPTY);
-  const [saving, setSaving]           = useState(false);
-  const [modalError, setModalError]   = useState('');
+  const [showModal, setShowModal]   = useState(false);
+  const [editing, setEditing]       = useState<Subscription | null>(null);
+  const [form, setForm]             = useState<Partial<Subscription>>(EMPTY);
+  const [saving, setSaving]         = useState(false);
+  const [modalError, setModalError] = useState('');
+  const [totalCostManual, setTotalCostManual] = useState(false);
 
-  // detail panel
-  const [selected, setSelected]       = useState<Subscription | null>(null);
-  const [deleting, setDeleting]       = useState(false);
+  const [selected, setSelected]     = useState<Subscription | null>(null);
+  const [deleting, setDeleting]     = useState(false);
+
+  // license issue/return controls
+  const [licenseCount, setLicenseCount] = useState(1);
+  const [licenseOp, setLicenseOp]       = useState<'idle' | 'issuing' | 'returning'>('idle');
+  const [licenseError, setLicenseError] = useState('');
 
   const load = () => {
     setLoading(true);
-    subscriptionsApi.list().then(data => { setItems(data); setLoading(false); }).catch(() => { setError('Failed to load subscriptions'); setLoading(false); });
+    subscriptionsApi.list()
+      .then(data => { setItems(data); setLoading(false); })
+      .catch(() => { setError('Failed to load subscriptions'); setLoading(false); });
   };
 
   useEffect(() => { load(); }, []);
@@ -79,16 +122,17 @@ export default function SubscriptionsPage() {
     return true;
   }), [items, search, filterStatus, filterCat]);
 
-  // stats
   const stats = useMemo(() => {
-    const active = items.filter(s => s.status === 'active');
-    const totalLicenses = active.reduce((sum, s) => sum + (s.num_licenses || 0), 0);
-    const totalCost     = active.reduce((sum, s) => sum + (s.total_cost || (s.num_licenses && s.cost_per_license ? s.num_licenses * s.cost_per_license : 0)), 0);
-    const expiringSoon  = active.filter(s => { const d = daysUntil(s.renewal_date); return d !== null && d >= 0 && d <= 30; }).length;
-    return { total: items.length, active: active.length, totalLicenses, totalCost, expiringSoon };
+    const active         = items.filter(s => s.status === 'active');
+    const totalLicenses  = active.reduce((sum, s) => sum + (s.num_licenses || 0), 0);
+    const usedLicenses   = active.reduce((sum, s) => sum + (s.licenses_used || 0), 0);
+    const availLicenses  = active.reduce((sum, s) => sum + (getAvailable(s) ?? 0), 0);
+    const totalCost      = active.reduce((sum, s) => sum + (s.total_cost ?? (s.num_licenses && s.cost_per_license ? s.num_licenses * s.cost_per_license : 0)), 0);
+    const expiringSoon   = active.filter(s => { const d = daysUntil(s.renewal_date); return d !== null && d >= 0 && d <= 30; }).length;
+    return { total: items.length, active: active.length, totalLicenses, usedLicenses, availLicenses, totalCost, expiringSoon };
   }, [items]);
 
-  const openAdd = () => { setEditing(null); setForm({ ...EMPTY }); setModalError(''); setTotalCostManual(false); setShowModal(true); };
+  const openAdd  = () => { setEditing(null); setForm({ ...EMPTY }); setModalError(''); setTotalCostManual(false); setShowModal(true); };
   const openEdit = (s: Subscription) => { setEditing(s); setForm({ ...s }); setModalError(''); setTotalCostManual(false); setShowModal(true); };
 
   const handleSave = async () => {
@@ -113,7 +157,7 @@ export default function SubscriptionsPage() {
       }
       setShowModal(false);
     } catch (e: any) {
-      setModalError(e?.response?.data?.detail || 'Failed to save');
+      setModalError(extractApiError(e));
     }
     setSaving(false);
   };
@@ -129,17 +173,40 @@ export default function SubscriptionsPage() {
     setDeleting(false);
   };
 
-  const [totalCostManual, setTotalCostManual] = useState(false);
+  const handleIssueLicenses = async () => {
+    if (!selected || licenseCount < 1) return;
+    setLicenseOp('issuing'); setLicenseError('');
+    try {
+      const updated = await subscriptionsApi.issueLicenses(selected.id, licenseCount);
+      setItems(prev => prev.map(s => s.id === updated.id ? updated : s));
+      setSelected(updated);
+      setLicenseCount(1);
+    } catch (e: any) {
+      setLicenseError(extractApiError(e, 'Failed to issue licenses'));
+    }
+    setLicenseOp('idle');
+  };
+
+  const handleReturnLicenses = async () => {
+    if (!selected || licenseCount < 1) return;
+    setLicenseOp('returning'); setLicenseError('');
+    try {
+      const updated = await subscriptionsApi.returnLicenses(selected.id, licenseCount);
+      setItems(prev => prev.map(s => s.id === updated.id ? updated : s));
+      setSelected(updated);
+      setLicenseCount(1);
+    } catch (e: any) {
+      setLicenseError(extractApiError(e, 'Failed to return licenses'));
+    }
+    setLicenseOp('idle');
+  };
 
   const f = (k: keyof Subscription, v: any) => setForm(prev => {
     const next = { ...prev, [k]: v };
     if (k === 'num_licenses' || k === 'cost_per_license') {
       const licenses = k === 'num_licenses' ? v : prev.num_licenses;
       const cost     = k === 'cost_per_license' ? v : prev.cost_per_license;
-      if (licenses && cost) {
-        next.total_cost = Math.round(licenses * cost * 100) / 100;
-        setTotalCostManual(false);
-      }
+      if (licenses && cost) { next.total_cost = Math.round(licenses * cost * 100) / 100; setTotalCostManual(false); }
     }
     return next;
   });
@@ -170,6 +237,7 @@ export default function SubscriptionsPage() {
     fInput:   { width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' as const },
     fRow:     { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 },
     fFull:    { marginBottom: 14 },
+    sectionTitle: { fontSize: 11, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 0.6, color: '#94a3b8', marginBottom: 10 },
   };
 
   return (
@@ -179,16 +247,55 @@ export default function SubscriptionsPage() {
         {canEdit && <button style={s.addBtn} onClick={openAdd}>+ Add Subscription</button>}
       </div>
 
-      {/* Stats */}
+      {/* ── Stats ── */}
       <div style={s.statsRow}>
-        <div style={s.card}><div style={s.cardVal}>{stats.total}</div><div style={s.cardLbl}>Total</div></div>
-        <div style={s.card}><div style={{ ...s.cardVal, color: '#16a34a' }}>{stats.active}</div><div style={s.cardLbl}>Active</div></div>
-        <div style={s.card}><div style={s.cardVal}>{stats.totalLicenses.toLocaleString()}</div><div style={s.cardLbl}>Total Licenses</div></div>
-        <div style={{ ...s.card }}><div style={s.cardVal}>{fmtCost(stats.totalCost)}</div><div style={s.cardLbl}>Total Cost (active)</div></div>
-        <div style={s.card}><div style={{ ...s.cardVal, color: stats.expiringSoon > 0 ? '#f59e0b' : '#0f172a' }}>{stats.expiringSoon}</div><div style={s.cardLbl}>Expiring in 30 days</div></div>
+        <div style={s.card}>
+          <div style={s.cardVal}>{stats.total}</div>
+          <div style={s.cardLbl}>Total</div>
+        </div>
+        <div style={s.card}>
+          <div style={{ ...s.cardVal, color: '#16a34a' }}>{stats.active}</div>
+          <div style={s.cardLbl}>Active</div>
+        </div>
+        {/* License availability card */}
+        <div style={{ ...s.card, border: '1px solid #bbf7d0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ ...s.cardVal, color: '#16a34a' }}>{stats.availLicenses.toLocaleString()}</div>
+              <div style={s.cardLbl}>Available Licenses</div>
+            </div>
+            <div style={{ textAlign: 'right' as const }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b' }}>{stats.usedLicenses.toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>in use</div>
+            </div>
+          </div>
+          {stats.totalLicenses > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ height: 4, background: '#e2e8f0', borderRadius: 2 }}>
+                <div style={{
+                  width: `${Math.min(100, stats.usedLicenses / stats.totalLicenses * 100)}%`,
+                  height: '100%',
+                  background: usageColor(stats.usedLicenses / stats.totalLicenses * 100),
+                  borderRadius: 2, transition: 'width 0.3s',
+                }} />
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>
+                {stats.totalLicenses.toLocaleString()} total
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={s.card}>
+          <div style={s.cardVal}>{fmtCost(stats.totalCost)}</div>
+          <div style={s.cardLbl}>Total Cost (active)</div>
+        </div>
+        <div style={s.card}>
+          <div style={{ ...s.cardVal, color: stats.expiringSoon > 0 ? '#f59e0b' : '#0f172a' }}>{stats.expiringSoon}</div>
+          <div style={s.cardLbl}>Expiring in 30 days</div>
+        </div>
       </div>
 
-      {/* Filters */}
+      {/* ── Filters ── */}
       <div style={s.filters}>
         <input style={{ ...s.input, width: 220 }} placeholder="Search name, vendor…" value={search} onChange={e => setSearch(e.target.value)} />
         <select style={s.input} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
@@ -207,7 +314,7 @@ export default function SubscriptionsPage() {
         )}
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 48, color: '#64748b' }}>Loading…</div>
       ) : error ? (
@@ -223,7 +330,7 @@ export default function SubscriptionsPage() {
               <th style={s.th}>Name</th>
               <th style={s.th}>Vendor</th>
               <th style={s.th}>Category</th>
-              <th style={s.th}>Licenses</th>
+              <th style={s.th}>License Usage</th>
               <th style={s.th}>Cost/License</th>
               <th style={s.th}>Total Cost</th>
               <th style={s.th}>Billing</th>
@@ -238,15 +345,20 @@ export default function SubscriptionsPage() {
               const computedTotal = sub.total_cost ?? (sub.num_licenses && sub.cost_per_license ? sub.num_licenses * sub.cost_per_license : null);
               return (
                 <tr key={sub.id}
-                  onClick={() => setSelected(selected?.id === sub.id ? null : sub)}
+                  onClick={() => { setSelected(selected?.id === sub.id ? null : sub); setLicenseCount(1); setLicenseError(''); }}
                   style={{ cursor: 'pointer', background: selected?.id === sub.id ? '#fff7ed' : 'transparent' }}
                   onMouseEnter={e => { if (selected?.id !== sub.id) e.currentTarget.style.background = '#f8fafc'; }}
                   onMouseLeave={e => { if (selected?.id !== sub.id) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <td style={{ ...s.td, fontWeight: 600 }}>{sub.name}{sub.plan_name ? <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 6 }}>{sub.plan_name}</span> : null}</td>
+                  <td style={{ ...s.td, fontWeight: 600 }}>
+                    {sub.name}
+                    {sub.plan_name && <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 6 }}>{sub.plan_name}</span>}
+                  </td>
                   <td style={s.td}>{sub.vendor || '—'}</td>
                   <td style={s.td}>{sub.category || '—'}</td>
-                  <td style={{ ...s.td, fontWeight: 600 }}>{sub.num_licenses ?? '—'}</td>
+                  <td style={{ ...s.td, minWidth: 130 }}>
+                    <LicenseBar sub={sub} />
+                  </td>
                   <td style={s.td}>{sub.cost_per_license != null ? fmtCost(sub.cost_per_license) : '—'}</td>
                   <td style={{ ...s.td, fontWeight: 600 }}>{fmtCost(computedTotal)}</td>
                   <td style={s.td}>{sub.billing_cycle || '—'}</td>
@@ -270,7 +382,7 @@ export default function SubscriptionsPage() {
         </table>
       )}
 
-      {/* Detail Panel */}
+      {/* ── Detail Panel ── */}
       {selected && (
         <>
           <div style={s.overlay} onClick={() => setSelected(null)} />
@@ -289,27 +401,109 @@ export default function SubscriptionsPage() {
             </div>
 
             <div style={{ padding: '20px 22px', flex: 1 }}>
-              {/* Key metrics */}
+
+              {/* ── License Tracking ── */}
+              {selected.num_licenses != null && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={s.sectionTitle}>License Usage</div>
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
+                    {/* Metrics row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                      {[
+                        { label: 'Total',     value: selected.num_licenses,                 color: '#0f172a' },
+                        { label: 'In Use',    value: selected.licenses_used ?? 0,           color: '#f59e0b' },
+                        { label: 'Available', value: getAvailable(selected) ?? 0,           color: '#16a34a' },
+                      ].map(m => (
+                        <div key={m.label} style={{ textAlign: 'center' as const, background: '#fff', borderRadius: 8, padding: '8px 6px', border: '1px solid #f1f5f9' }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: m.color, lineHeight: 1.1 }}>{m.value}</div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>{m.label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Progress bar */}
+                    {(() => {
+                      const used  = selected.licenses_used ?? 0;
+                      const total = selected.num_licenses!;
+                      const pct   = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+                      return (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ height: 8, background: '#e2e8f0', borderRadius: 4 }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: usageColor(pct), borderRadius: 4, transition: 'width 0.3s' }} />
+                          </div>
+                          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>
+                            {pct.toFixed(0)}% in use
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Issue / Return controls */}
+                    {canEdit && (
+                      <div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <input
+                            type="number" min={1}
+                            max={selected.num_licenses ?? undefined}
+                            value={licenseCount}
+                            onChange={e => setLicenseCount(Math.max(1, parseInt(e.target.value) || 1))}
+                            style={{ width: 60, padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, textAlign: 'center' as const }}
+                          />
+                          <button
+                            onClick={handleIssueLicenses}
+                            disabled={licenseOp !== 'idle' || (getAvailable(selected) ?? 0) < licenseCount}
+                            style={{
+                              flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none',
+                              background: (getAvailable(selected) ?? 0) >= licenseCount ? '#0f172a' : '#e2e8f0',
+                              color: (getAvailable(selected) ?? 0) >= licenseCount ? '#fff' : '#94a3b8',
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            }}
+                          >
+                            {licenseOp === 'issuing' ? '…' : '↑ Issue'}
+                          </button>
+                          <button
+                            onClick={handleReturnLicenses}
+                            disabled={licenseOp !== 'idle' || (selected.licenses_used ?? 0) < licenseCount}
+                            style={{
+                              flex: 1, padding: '7px 10px', borderRadius: 8, border: 'none',
+                              background: (selected.licenses_used ?? 0) >= licenseCount ? '#dcfce7' : '#e2e8f0',
+                              color: (selected.licenses_used ?? 0) >= licenseCount ? '#16a34a' : '#94a3b8',
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            }}
+                          >
+                            {licenseOp === 'returning' ? '…' : '↓ Return'}
+                          </button>
+                        </div>
+                        {licenseError && (
+                          <div style={{ fontSize: 11, color: '#dc2626', marginTop: 6 }}>{licenseError}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Cost metrics ── */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
                 {[
-                  { label: 'Licenses', value: selected.num_licenses ?? '—' },
                   { label: 'Cost / License', value: selected.cost_per_license != null ? fmtCost(selected.cost_per_license) : '—' },
-                  { label: 'Total Cost', value: fmtCost(selected.total_cost ?? (selected.num_licenses && selected.cost_per_license ? selected.num_licenses * selected.cost_per_license : null)) },
-                  { label: 'Billing Cycle', value: selected.billing_cycle || '—' },
+                  { label: 'Total Cost',     value: fmtCost(selected.total_cost ?? (selected.num_licenses && selected.cost_per_license ? selected.num_licenses * selected.cost_per_license : null)) },
+                  { label: 'Billing Cycle',  value: selected.billing_cycle || '—' },
+                  { label: 'Auto-renew',     value: selected.auto_renew ? 'Yes' : 'No' },
                 ].map(({ label, value }) => (
-                  <div key={label} style={{ background: '#f8fafc', borderRadius: 8, padding: '12px 14px' }}>
+                  <div key={label} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 12px' }}>
                     <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>{label}</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{String(value)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{String(value)}</div>
                   </div>
                 ))}
               </div>
 
-              {/* Dates */}
+              {/* ── Dates ── */}
               <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 10, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Dates</div>
+                <div style={s.sectionTitle}>Dates</div>
                 {[
-                  { label: 'Start Date', value: selected.start_date },
-                  { label: 'Renewal Date', value: selected.renewal_date },
+                  { label: 'Start Date',    value: selected.start_date },
+                  { label: 'Renewal Date',  value: selected.renewal_date },
                 ].map(({ label, value }) => {
                   const days = label === 'Renewal Date' ? daysUntil(value) : null;
                   return (
@@ -326,17 +520,13 @@ export default function SubscriptionsPage() {
                     </div>
                   );
                 })}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>Auto-renew</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: selected.auto_renew ? '#16a34a' : '#64748b' }}>{selected.auto_renew ? 'Yes' : 'No'}</span>
-                </div>
               </div>
 
-              {/* Details */}
+              {/* ── Details ── */}
               <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 10, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>Details</div>
+                <div style={s.sectionTitle}>Details</div>
                 {[
-                  { label: 'Vendor', value: selected.vendor },
+                  { label: 'Vendor',   value: selected.vendor },
                   { label: 'Category', value: selected.category },
                 ].map(({ label, value }) => value ? (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #f1f5f9' }}>
@@ -368,7 +558,7 @@ export default function SubscriptionsPage() {
         </>
       )}
 
-      {/* Add / Edit Modal */}
+      {/* ── Add / Edit Modal ── */}
       {showModal && (
         <div style={s.modal}>
           <div style={s.modalBox}>
@@ -384,88 +574,63 @@ export default function SubscriptionsPage() {
               </div>
 
               <div style={s.fRow}>
-                <div>
-                  <label style={s.label}>Vendor</label>
-                  <input style={s.fInput} value={form.vendor || ''} onChange={e => f('vendor', e.target.value)} placeholder="e.g. Adobe" />
-                </div>
-                <div>
-                  <label style={s.label}>Plan / Tier</label>
-                  <input style={s.fInput} value={form.plan_name || ''} onChange={e => f('plan_name', e.target.value)} placeholder="e.g. Enterprise" />
-                </div>
+                <div><label style={s.label}>Vendor</label>
+                  <input style={s.fInput} value={form.vendor || ''} onChange={e => f('vendor', e.target.value)} placeholder="e.g. Adobe" /></div>
+                <div><label style={s.label}>Plan / Tier</label>
+                  <input style={s.fInput} value={form.plan_name || ''} onChange={e => f('plan_name', e.target.value)} placeholder="e.g. Enterprise" /></div>
               </div>
 
               <div style={s.fRow}>
-                <div>
-                  <label style={s.label}>Category</label>
+                <div><label style={s.label}>Category</label>
                   <select style={s.fInput} value={form.category || ''} onChange={e => f('category', e.target.value)}>
                     <option value="">Select category</option>
                     {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={s.label}>Billing Cycle</label>
+                  </select></div>
+                <div><label style={s.label}>Billing Cycle</label>
                   <select style={s.fInput} value={form.billing_cycle || 'annually'} onChange={e => f('billing_cycle', e.target.value)}>
                     {BILLING_CYCLES.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-                  </select>
-                </div>
+                  </select></div>
               </div>
 
               <div style={s.fRow}>
-                <div>
-                  <label style={s.label}>No. of Licenses</label>
-                  <input style={s.fInput} type="number" min={1} value={form.num_licenses ?? ''} onChange={e => f('num_licenses', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 25" />
-                </div>
-                <div>
-                  <label style={s.label}>Cost per License</label>
-                  <input style={s.fInput} type="number" min={0} step="0.01" value={form.cost_per_license ?? ''} onChange={e => f('cost_per_license', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 1200" />
-                </div>
+                <div><label style={s.label}>Total Licenses</label>
+                  <input style={s.fInput} type="number" min={1} value={form.num_licenses ?? ''} onChange={e => f('num_licenses', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 25" /></div>
+                <div><label style={s.label}>Cost per License</label>
+                  <input style={s.fInput} type="number" min={0} step="0.01" value={form.cost_per_license ?? ''} onChange={e => f('cost_per_license', e.target.value ? Number(e.target.value) : undefined)} placeholder="e.g. 1200" /></div>
               </div>
 
               <div style={s.fFull}>
                 <label style={s.label}>
                   Total Cost
                   {!totalCostManual && form.num_licenses && form.cost_per_license ? (
-                    <span style={{ fontWeight: 600, color: '#16a34a', marginLeft: 8, fontSize: 11, background: '#dcfce7', padding: '1px 7px', borderRadius: 10 }}>
-                      auto-calculated
-                    </span>
+                    <span style={{ fontWeight: 600, color: '#16a34a', marginLeft: 8, fontSize: 11, background: '#dcfce7', padding: '1px 7px', borderRadius: 10 }}>auto-calculated</span>
                   ) : totalCostManual ? (
                     <button onClick={() => {
                       if (form.num_licenses && form.cost_per_license) {
                         setForm(prev => ({ ...prev, total_cost: Math.round(form.num_licenses! * form.cost_per_license! * 100) / 100 }));
                         setTotalCostManual(false);
                       }
-                    }} style={{ marginLeft: 8, fontSize: 11, color: '#ea580c', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
-                      ↺ reset to calculated
-                    </button>
+                    }} style={{ marginLeft: 8, fontSize: 11, color: '#ea580c', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>↺ reset</button>
                   ) : null}
                 </label>
-                <input
-                  style={{ ...s.fInput, background: !totalCostManual && form.num_licenses && form.cost_per_license ? '#f0fdf4' : undefined }}
-                  type="number" min={0} step="0.01"
-                  value={form.total_cost ?? ''}
+                <input style={{ ...s.fInput, background: !totalCostManual && form.num_licenses && form.cost_per_license ? '#f0fdf4' : undefined }}
+                  type="number" min={0} step="0.01" value={form.total_cost ?? ''}
                   onChange={e => { setTotalCostManual(true); f('total_cost', e.target.value ? Number(e.target.value) : undefined); }}
-                  placeholder="Auto-calculated from licenses × cost"
-                />
+                  placeholder="Auto-calculated from licenses × cost" />
               </div>
 
               <div style={s.fRow}>
-                <div>
-                  <label style={s.label}>Start Date</label>
-                  <input style={s.fInput} type="date" value={form.start_date || ''} onChange={e => f('start_date', e.target.value)} />
-                </div>
-                <div>
-                  <label style={s.label}>Renewal / Expiry Date</label>
-                  <input style={s.fInput} type="date" value={form.renewal_date || ''} onChange={e => f('renewal_date', e.target.value)} />
-                </div>
+                <div><label style={s.label}>Start Date</label>
+                  <input style={s.fInput} type="date" value={form.start_date || ''} onChange={e => f('start_date', e.target.value)} /></div>
+                <div><label style={s.label}>Renewal / Expiry Date</label>
+                  <input style={s.fInput} type="date" value={form.renewal_date || ''} onChange={e => f('renewal_date', e.target.value)} /></div>
               </div>
 
               <div style={s.fRow}>
-                <div>
-                  <label style={s.label}>Status</label>
+                <div><label style={s.label}>Status</label>
                   <select style={s.fInput} value={form.status || 'active'} onChange={e => f('status', e.target.value)}>
                     {STATUSES.map(st => <option key={st} value={st}>{st.charAt(0).toUpperCase() + st.slice(1)}</option>)}
-                  </select>
-                </div>
+                  </select></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 20 }}>
                   <input type="checkbox" id="auto_renew" checked={form.auto_renew || false} onChange={e => f('auto_renew', e.target.checked)} />
                   <label htmlFor="auto_renew" style={{ fontSize: 13, color: '#374151', cursor: 'pointer', fontWeight: 500 }}>Auto-renew</label>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { reportsApi, notificationsApi, notificationSettingsApi, NotificationConfig, subscriptionsApi } from '../services/api';
+import { reportsApi, notificationsApi, notificationSettingsApi, NotificationConfig, subscriptionsApi, usersApi, extractApiError } from '../services/api';
 
 const staticNavItems = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -67,6 +67,12 @@ export default function Layout() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [changePwdForm, setChangePwdForm] = useState({ current: '', next: '', confirm: '' });
+  const [changePwdSaving, setChangePwdSaving] = useState(false);
+  const [changePwdError, setChangePwdError] = useState('');
+  const [changePwdSuccess, setChangePwdSuccess] = useState(false);
 
   /* inactivity auto-logout */
   const IDLE_MS      = 60 * 60 * 1000;   // 1 hour
@@ -481,6 +487,19 @@ export default function Layout() {
                   Notification Settings
                 </button>
                 <button
+                  onClick={() => { setProfileOpen(false); setChangePwdForm({ current: '', next: '', confirm: '' }); setChangePwdError(''); setChangePwdSuccess(false); setShowChangePwd(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', width: '100%',
+                    padding: '10px 16px', background: 'none', border: 'none',
+                    cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#374151',
+                    textAlign: 'left', borderBottom: '1px solid #f1f5f9',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  Change Password
+                </button>
+                <button
                   onClick={handleLogout}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
@@ -714,6 +733,90 @@ export default function Layout() {
                 }}
                   style={{ padding: '8px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   {notifConfigSaving ? 'Saving…' : 'Save Settings'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Change Password Modal ── */}
+      {showChangePwd && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+          <div style={{ background: '#fff', borderRadius: 14, width: 420, boxShadow: '0 8px 48px rgba(0,0,0,0.22)', overflow: 'hidden' }}>
+            <div style={{ background: 'linear-gradient(135deg,#1e293b,#0f172a)', padding: '20px 24px', color: '#fff' }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>Change Password</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>Update your account password</div>
+            </div>
+            <div style={{ padding: '24px' }}>
+              {changePwdSuccess && (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 16 }}>
+                  Password changed successfully.
+                </div>
+              )}
+              {changePwdError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, padding: '9px 12px', fontSize: 13, marginBottom: 16 }}>
+                  {changePwdError}
+                </div>
+              )}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Current Password</label>
+                <input
+                  type="password" autoComplete="current-password"
+                  value={changePwdForm.current}
+                  onChange={e => setChangePwdForm(p => ({ ...p, current: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' as const }}
+                  placeholder="Enter current password"
+                />
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 5 }}>New Password</label>
+                <input
+                  type="password" autoComplete="new-password"
+                  value={changePwdForm.next}
+                  onChange={e => setChangePwdForm(p => ({ ...p, next: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' as const }}
+                  placeholder="Min 8 chars, uppercase, lowercase, digit"
+                />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 5 }}>Confirm New Password</label>
+                <input
+                  type="password" autoComplete="new-password"
+                  value={changePwdForm.confirm}
+                  onChange={e => setChangePwdForm(p => ({ ...p, confirm: e.target.value }))}
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' as const }}
+                  placeholder="Repeat new password"
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowChangePwd(false)}
+                  style={{ padding: '8px 18px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button
+                  disabled={changePwdSaving}
+                  onClick={async () => {
+                    setChangePwdError(''); setChangePwdSuccess(false);
+                    if (!changePwdForm.current || !changePwdForm.next || !changePwdForm.confirm) {
+                      setChangePwdError('All fields are required.'); return;
+                    }
+                    if (changePwdForm.next !== changePwdForm.confirm) {
+                      setChangePwdError('New passwords do not match.'); return;
+                    }
+                    setChangePwdSaving(true);
+                    try {
+                      await usersApi.changePassword(changePwdForm.current, changePwdForm.next);
+                      setChangePwdSuccess(true);
+                      setChangePwdForm({ current: '', next: '', confirm: '' });
+                      setTimeout(() => setShowChangePwd(false), 1800);
+                    } catch (err: any) {
+                      setChangePwdError(extractApiError(err, 'Failed to change password.'));
+                    }
+                    setChangePwdSaving(false);
+                  }}
+                  style={{ padding: '8px 20px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  {changePwdSaving ? 'Saving…' : 'Update Password'}
                 </button>
               </div>
             </div>

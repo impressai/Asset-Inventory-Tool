@@ -214,23 +214,25 @@ export const notificationsApi = {
 
 // ─── Subscriptions ────────────────────────────────────────────
 export interface Subscription {
-  id:               string;
-  name:             string;
-  vendor?:          string;
-  category?:        string;
-  plan_name?:       string;
-  num_licenses?:    number;
-  cost_per_license?: number;
-  billing_cycle?:   string;
-  total_cost?:      number;
-  start_date?:      string;
-  renewal_date?:    string;
-  auto_renew:       boolean;
-  status:           string;
-  notes?:           string;
-  is_active:        boolean;
-  created_at:       string;
-  updated_at?:      string;
+  id:                   string;
+  name:                 string;
+  vendor?:              string;
+  category?:            string;
+  plan_name?:           string;
+  num_licenses?:        number;
+  licenses_used:        number;
+  licenses_available?:  number;
+  cost_per_license?:    number;
+  billing_cycle?:       string;
+  total_cost?:          number;
+  start_date?:          string;
+  renewal_date?:        string;
+  auto_renew:           boolean;
+  status:               string;
+  notes?:               string;
+  is_active:            boolean;
+  created_at:           string;
+  updated_at?:          string;
 }
 
 export const subscriptionsApi = {
@@ -245,6 +247,12 @@ export const subscriptionsApi = {
 
   delete: (id: string): Promise<void> =>
     api.delete(`/subscriptions/${id}`).then(r => r.data),
+
+  issueLicenses: (id: string, count: number): Promise<Subscription> =>
+    api.post(`/subscriptions/${id}/issue`, { count }).then(r => r.data),
+
+  returnLicenses: (id: string, count: number): Promise<Subscription> =>
+    api.post(`/subscriptions/${id}/return`, { count }).then(r => r.data),
 
   expiring: (days = 30) =>
     api.get('/notifications/subscriptions-expiring', { params: { days } }).then(r => r.data),
@@ -294,6 +302,40 @@ export const usersApi = {
     api.post('/users', data).then(r => r.data),
   update: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data).then(r => r.data),
+  changePassword: (current_password: string, new_password: string): Promise<void> =>
+    api.post('/users/me/change-password', { current_password, new_password }).then(r => r.data),
+  resetPassword: (id: string, new_password: string): Promise<void> =>
+    api.post(`/users/${id}/reset-password`, { new_password }).then(r => r.data),
 };
+
+// ─── Error extraction helper ──────────────────────────────────
+/**
+ * Turn any Axios / fetch error into a human-readable string.
+ * Handles FastAPI's two detail formats:
+ *   • string  — returned for 4xx business errors
+ *   • array   — returned for 422 validation errors
+ */
+export function extractApiError(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  const e = err as any;
+  const detail = e?.response?.data?.detail;
+
+  if (detail == null) {
+    // Network / CORS / timeout error
+    if (e?.message && typeof e.message === 'string') return e.message;
+    return fallback;
+  }
+
+  if (typeof detail === 'string') return detail;
+
+  if (Array.isArray(detail)) {
+    // FastAPI validation error: [{ loc, msg, type }, ...]
+    const msgs = detail
+      .map((d: any) => (typeof d === 'string' ? d : d?.msg ?? JSON.stringify(d)))
+      .filter(Boolean);
+    return msgs.length ? msgs.join('; ') : fallback;
+  }
+
+  return String(detail) || fallback;
+}
 
 export default api;

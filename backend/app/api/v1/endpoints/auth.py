@@ -2,12 +2,15 @@
 Auth Endpoints — login, token refresh, logout
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, get_current_user
+from app.core.limiter import limiter
 from app.core.security import (
     verify_password, get_password_hash,
     create_access_token, create_refresh_token, decode_token,
@@ -17,6 +20,17 @@ from app.core.email import send_email, password_reset_email
 from app.core.config import settings
 from app.models.models import User
 from app.schemas.auth import TokenResponse, RefreshRequest
+
+
+def _validate_password_strength(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter.")
+    if not re.search(r"[a-z]", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter.")
+    if not re.search(r"\d", password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one digit.")
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -31,7 +45,9 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -41,7 +57,7 @@ def login(
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -96,7 +112,8 @@ def logout(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/forgot-password")
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("3/minute")
+def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """Generate a password reset link and email it. Always returns 200 to avoid user enumeration."""
     user = db.query(User).filter(User.email == payload.email, User.is_active == True).first()
     if user:
@@ -117,8 +134,7 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
     data = decode_token(payload.token)
     if not data or data.get("type") != "password_reset":
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
-    if len(payload.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    _validate_password_strength(payload.new_password)
     user = db.query(User).filter(User.id == data["sub"], User.is_active == True).first()
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")

@@ -247,10 +247,17 @@ class Subscription(Base):
     renewal_date     = Column(Date,     nullable=True)     # used for expiry notifications
     auto_renew       = Column(Boolean,  default=False)
     status           = Column(String(50), nullable=False, default='active')  # active/expired/cancelled/paused
+    licenses_used    = Column(Integer,  nullable=False, default=0, server_default='0')
     notes            = Column(Text,     nullable=True)
     is_active        = Column(Boolean,  default=True)
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @property
+    def licenses_available(self) -> int | None:
+        if self.num_licenses is None:
+            return None
+        return max(0, self.num_licenses - (self.licenses_used or 0))
 
 
 class NotificationConfig(Base):

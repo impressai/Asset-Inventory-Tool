@@ -1,0 +1,74 @@
+{
+  "family": "asset-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/asset-inventory-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "APP_ENV",                          "value": "production" },
+        { "name": "POSTGRES_HOST",                    "value": "<RDS_ENDPOINT>" },
+        { "name": "POSTGRES_PORT",                    "value": "5432" },
+        { "name": "POSTGRES_DB",                      "value": "asset_inventory" },
+        { "name": "POSTGRES_USER",                    "value": "asset_user" },
+        { "name": "SMTP_HOST",                        "value": "smtp.gmail.com" },
+        { "name": "SMTP_PORT",                        "value": "587" },
+        { "name": "EMAILS_FROM_NAME",                 "value": "Asset Inventory" },
+        { "name": "EMAILS_FROM_EMAIL",                "value": "noreply@yourdomain.com" },
+        { "name": "FRONTEND_URL",                     "value": "https://yourdomain.com" },
+        { "name": "ALLOWED_ORIGINS",                  "value": "[\"https://yourdomain.com\"]" },
+        { "name": "AWS_REGION",                       "value": "ap-south-1" },
+        { "name": "S3_BUCKET_DOCUMENTS",              "value": "asset-inventory-documents" }
+      ],
+      "secrets": [
+        {
+          "name": "SECRET_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:asset-inventory-prod:SECRET_KEY::"
+        },
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:asset-inventory-prod:DATABASE_URL::"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:asset-inventory-prod:POSTGRES_PASSWORD::"
+        },
+        {
+          "name": "SMTP_USER",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:asset-inventory-prod:SMTP_USER::"
+        },
+        {
+          "name": "SMTP_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:asset-inventory-prod:SMTP_PASSWORD::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/asset-backend",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

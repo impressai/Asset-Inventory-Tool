@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from typing import Optional
 from uuid import UUID
 from datetime import date, datetime
@@ -10,13 +10,14 @@ class SubscriptionCreate(BaseModel):
     category:         Optional[str]   = None
     plan_name:        Optional[str]   = None
     num_licenses:     Optional[int]   = None
+    licenses_used:    int             = 0
     cost_per_license: Optional[float] = None
     billing_cycle:    Optional[str]   = None
     total_cost:       Optional[float] = None
     start_date:       Optional[date]  = None
     renewal_date:     Optional[date]  = None
-    auto_renew:       bool = False
-    status:           str  = 'active'
+    auto_renew:       bool            = False
+    status:           str             = 'active'
     notes:            Optional[str]   = None
 
 
@@ -26,6 +27,7 @@ class SubscriptionUpdate(BaseModel):
     category:         Optional[str]   = None
     plan_name:        Optional[str]   = None
     num_licenses:     Optional[int]   = None
+    licenses_used:    Optional[int]   = None
     cost_per_license: Optional[float] = None
     billing_cycle:    Optional[str]   = None
     total_cost:       Optional[float] = None
@@ -37,9 +39,10 @@ class SubscriptionUpdate(BaseModel):
 
 
 class SubscriptionResponse(SubscriptionCreate):
-    id:         UUID
-    is_active:  bool
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    id:                  UUID
+    licenses_available:  Optional[int] = None
+    is_active:           bool
+    created_at:          datetime
+    updated_at:          Optional[datetime] = None
 
     model_config = {"from_attributes": True}

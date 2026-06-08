@@ -1,6 +1,8 @@
 """Purchasing / procurement endpoint"""
 import os
+import uuid as _uuid
 from datetime import date
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
@@ -95,19 +97,25 @@ def upload_document(
     if file.size and file.size > settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File exceeds maximum upload size")
 
+    allowed_extensions = {".pdf", ".jpg", ".jpeg", ".png", ".xlsx"}
+    orig_ext = Path(file.filename or "").suffix.lower()
+    if orig_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Invalid file extension")
+
+    safe_filename = f"{_uuid.uuid4()}{orig_ext}"
     upload_dir = os.path.join(settings.LOCAL_UPLOAD_DIR, "purchases", str(purchase_id))
     os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, file.filename)
+    file_path = os.path.join(upload_dir, safe_filename)
 
     with open(file_path, "wb") as f:
         f.write(file.file.read())
 
-    relative_key = f"purchases/{purchase_id}/{file.filename}"
+    relative_key = f"purchases/{purchase_id}/{safe_filename}"
     existing_docs = purchase.documents or []
     purchase.documents = existing_docs + [relative_key]
     db.commit()
 
-    return {"key": relative_key, "filename": file.filename}
+    return {"key": relative_key, "filename": file.filename, "safe_filename": safe_filename}
 
 
 @router.get("/{purchase_id}/documents/{filename}")
@@ -121,7 +129,11 @@ def download_document(
     purchase = db.query(Purchase).filter(Purchase.id == purchase_id).first()
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
-    file_path = os.path.join(settings.LOCAL_UPLOAD_DIR, "purchases", str(purchase_id), filename)
+
+    base_dir = os.path.abspath(os.path.join(settings.LOCAL_UPLOAD_DIR, "purchases", str(purchase_id)))
+    file_path = os.path.abspath(os.path.join(base_dir, filename))
+    if not file_path.startswith(base_dir + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path, filename=filename)

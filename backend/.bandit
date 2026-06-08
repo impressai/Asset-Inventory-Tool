@@ -1,0 +1,3 @@
+[bandit]
+exclude = tests,alembic,seed.py
+skips = B101,B608

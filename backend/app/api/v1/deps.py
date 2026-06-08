@@ -79,7 +79,7 @@ def check_permission(permission_key: str):
         if current_user.role == UserRole.ADMIN:
             return current_user
         row = db.query(RolePermission).filter(
-            RolePermission.role == current_user.role.value,
+            RolePermission.role == current_user.role,
             RolePermission.permission == permission_key,
         ).first()
         if row is None or not row.allowed:

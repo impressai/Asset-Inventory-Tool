@@ -53,18 +53,15 @@ FROM base AS production
 
 RUN pip install --no-cache-dir gunicorn
 
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chown appuser:appgroup /entrypoint.sh
+
 USER appuser
 
 EXPOSE 8000
 
 # Health check for ECS
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["gunicorn", "app.main:app", \
-     "-k", "uvicorn.workers.UvicornWorker", \
-     "--workers", "4", \
-     "--bind", "0.0.0.0:8000", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+ENTRYPOINT ["/entrypoint.sh"]

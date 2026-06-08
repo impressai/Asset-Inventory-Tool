@@ -1,0 +1,48 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: marks tests as integration tests (require DB)",
+    "unit: marks tests as unit tests (no external deps)",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/db/*",
+    "app/models/*",
+    "*/alembic/*",
+    "seed.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
+
+# ─── Ruff (linting) ──────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # do not perform function calls in default arguments (FastAPI Depends)
+    "B904",   # raise from (not always needed)
+    "F401",   # unused import (some intentional re-exports)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]   # allow assert in tests
+
+# ─── Bandit (SAST) ────────────────────────────────────────────
+[tool.bandit]
+exclude_dirs = ["tests", "alembic", "seed.py"]
+skips = [
+    "B101",   # assert — acceptable in tests/debug
+    "B608",   # hardcoded SQL — we use ORM, no raw SQL
+]

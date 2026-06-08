@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, require_admin_or_manager, get_current_user
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.models.models import User, UserRole
-from app.schemas.user import UserCreate, UserUpdate, UserResponse
+from app.schemas.user import UserCreate, UserUpdate, UserResponse, ChangePasswordRequest, AdminResetPasswordRequest
+from app.api.v1.endpoints.auth import _validate_password_strength
 
 router = APIRouter()
 
@@ -65,6 +66,39 @@ def create_user(
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/me/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_my_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Any authenticated user can change their own password by supplying their current password."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    _validate_password_strength(payload.new_password)
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="New password must differ from the current password.")
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+
+
+@router.post("/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def admin_reset_password(
+    user_id: UUID,
+    payload: AdminResetPasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_manager),
+):
+    """Admin / Manager can reset another user's password without knowing the current one."""
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    _guard_superadmin(current_user, user)
+    _validate_password_strength(payload.new_password)
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
 
 
 @router.get("/{user_id}", response_model=UserResponse)

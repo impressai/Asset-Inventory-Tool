@@ -2,14 +2,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
-from app.api.v1.deps import get_db, get_current_user
+from app.api.v1.deps import get_db, require_admin_or_manager, require_admin
 from app.models.models import Asset, Assignment, User, Subscription
 from app.core.email import send_email, notification_alert_email
 
 router = APIRouter()
 
 @router.get("/warranty-expiring")
-def warranty_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def warranty_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(require_admin_or_manager)):
     """Assets whose warranty expiry date is within ±N days of today."""
     today = date.today()
     lookback  = today - timedelta(days=days)
@@ -24,7 +24,7 @@ def warranty_expiring_soon(days: int = 30, db: Session = Depends(get_db), curren
 
 
 @router.get("/software-expiring")
-def software_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def software_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(require_admin_or_manager)):
     """Assets whose license/subscription expiry_date is within ±N days of today."""
     today = date.today()
     lookback  = today - timedelta(days=days)
@@ -39,7 +39,7 @@ def software_expiring_soon(days: int = 30, db: Session = Depends(get_db), curren
 
 
 @router.get("/overdue-assignments")
-def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(require_admin_or_manager)):
     """Active assignments whose expected return date has passed."""
     today = date.today()
     rows = (
@@ -72,7 +72,7 @@ def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(get_
 
 
 @router.get("/subscriptions-expiring")
-def subscriptions_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def subscriptions_expiring_soon(days: int = 30, db: Session = Depends(get_db), current_user=Depends(require_admin_or_manager)):
     """Subscriptions whose renewal_date is within ±N days of today."""
     today = date.today()
     lookback  = today - timedelta(days=days)
@@ -103,7 +103,7 @@ def subscriptions_expiring_soon(days: int = 30, db: Session = Depends(get_db), c
 
 
 @router.post("/send-alerts")
-def send_alert_emails(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def send_alert_emails(days: int = 30, db: Session = Depends(get_db), current_user=Depends(require_admin)):
     """Send notification summary email to all admin users."""
     today = date.today()
     lookback  = today - timedelta(days=days)
@@ -151,7 +151,7 @@ def send_alert_emails(days: int = 30, db: Session = Depends(get_db), current_use
     if not warranty_items and not license_items and not overdue_items:
         return {"sent": 0, "message": "No active alerts to send."}
 
-    users = db.query(User).filter(User.is_active == True).all()
+    users = db.query(User).filter(User.role == "admin", User.is_active == True).all()
     sent = 0
     for user in users:
         ok = send_email(

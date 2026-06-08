@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict
 
-from app.api.v1.deps import get_db, get_current_user, require_admin
+from app.api.v1.deps import get_db, require_admin
 from app.models.models import RolePermission, UserRole, PERMISSION_KEYS, User
 
 router = APIRouter()
@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("")
 def get_permissions(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ):
     rows = db.query(RolePermission).all()
     result: Dict[str, Dict[str, bool]] = {r.value: {} for r in UserRole}

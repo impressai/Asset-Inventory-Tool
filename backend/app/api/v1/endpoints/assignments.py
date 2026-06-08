@@ -15,7 +15,10 @@ from app.models.models import (
     Assignment, Asset, User, AssetStatus, ApprovalStatus,
     AssetHistory, HistoryEventType, NotificationConfig,
 )
-from app.schemas.assignment import AssignmentCreate, AssignmentResponse
+from app.schemas.assignment import (
+    AssignmentCreate, AssignmentResponse, AssignmentUpdate,
+    BulkReturnRequest, ClearanceEmailRequest,
+)
 from app.core.email import send_email, asset_assigned_email, asset_returned_email, clearance_email
 
 router = APIRouter()
@@ -153,7 +156,7 @@ def create_assignment(
 @router.patch("/{assignment_id}", response_model=AssignmentResponse)
 def update_assignment(
     assignment_id: UUID,
-    payload: dict,
+    payload: AssignmentUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin_or_manager),
 ):
@@ -164,10 +167,8 @@ def update_assignment(
     if not assignment:
         raise HTTPException(status_code=404, detail="Active assignment not found")
 
-    allowed = {"assignee_name", "assignee_email", "employee_id", "designation", "department", "expected_return_date", "notes"}
-    for field, value in payload.items():
-        if field in allowed:
-            setattr(assignment, field, value or None)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(assignment, field, value or None)
 
     db.commit()
     db.refresh(assignment)
@@ -259,12 +260,12 @@ def return_asset(
 
 @router.post("/bulk-return")
 def bulk_return_assets(
-    payload: dict,
+    payload: BulkReturnRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(check_permission("return_asset")),
 ):
     """Return multiple assets at once (offboarding). Expects {assignment_ids: [uuid, ...]}."""
-    raw_ids = payload.get("assignment_ids", [])
+    raw_ids = payload.assignment_ids
     returned_count = 0
     failed_ids: List[str] = []
 
@@ -325,21 +326,15 @@ def bulk_return_assets(
 
 @router.post("/send-clearance-email")
 def send_clearance_email_endpoint(
-    payload: dict,
+    payload: ClearanceEmailRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin_or_manager),
 ):
     """Email an asset clearance certificate to an employee and/or manager."""
     from datetime import datetime
 
-    employee_email = (payload.get("employee_email") or "").strip()
-    # Accept a list of manager emails; also support legacy single field
-    manager_emails: List[str] = [
-        e.strip() for e in (payload.get("manager_emails") or [])
-        if isinstance(e, str) and e.strip()
-    ]
-    if not manager_emails and payload.get("manager_email"):
-        manager_emails = [payload["manager_email"].strip()]
+    employee_email = str(payload.employee_email) if payload.employee_email else ""
+    manager_emails: List[str] = [str(e) for e in (payload.manager_emails or [])]
 
     if not employee_email and not manager_emails:
         raise HTTPException(status_code=422, detail="At least one recipient email is required")
@@ -347,22 +342,22 @@ def send_clearance_email_endpoint(
     clearance_date = datetime.today().strftime("%d %B %Y")
 
     html = clearance_email(
-        employee_name=payload.get("employee_name", "Employee"),
-        employee_id=payload.get("employee_id"),
-        department=payload.get("department"),
-        designation=payload.get("designation"),
-        current_assets=payload.get("current_assets", []),
-        history_assets=payload.get("history_assets", []),
-        note=payload.get("note"),
+        employee_name=payload.employee_name,
+        employee_id=payload.employee_id,
+        department=payload.department,
+        designation=payload.designation,
+        current_assets=payload.current_assets,
+        history_assets=payload.history_assets,
+        note=payload.note,
         generated_by=current_user.full_name,
         clearance_date=clearance_date,
     )
 
-    subject = f"Asset Clearance Certificate — {payload.get('employee_name', 'Employee')}"
+    subject = f"Asset Clearance Certificate — {payload.employee_name}"
     sent, failed = [], []
 
     if employee_email:
-        ok = send_email(to_email=employee_email, to_name=payload.get("employee_name", "Employee"), subject=subject, html_body=html)
+        ok = send_email(to_email=employee_email, to_name=payload.employee_name, subject=subject, html_body=html)
         (sent if ok else failed).append(employee_email)
 
     for mgr_email in manager_emails:

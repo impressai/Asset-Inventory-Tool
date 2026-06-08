@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { usersApi, rolePermissionsApi } from '../services/api';
+import { usersApi, rolePermissionsApi, extractApiError } from '../services/api';
+
 import { User, UserRole } from '../types';
 import { useAuthStore } from '../store/authStore';
 
@@ -102,6 +103,12 @@ export default function UsersPage() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [deactivating, setDeactivating]           = useState(false);
 
+  const [showResetPwd, setShowResetPwd]       = useState(false);
+  const [resetPwdForm, setResetPwdForm]       = useState({ next: '', confirm: '' });
+  const [resetPwdSaving, setResetPwdSaving]   = useState(false);
+  const [resetPwdError, setResetPwdError]     = useState('');
+  const [resetPwdSuccess, setResetPwdSuccess] = useState(false);
+
   // ── Roles state ───────────────────────────────────────────────
   const [perms, setPerms]       = useState<Record<string, Record<string, boolean>>>({});
   const [draft, setDraft]       = useState<Record<string, Record<string, boolean>>>({});
@@ -124,8 +131,8 @@ export default function UsersPage() {
   useEffect(() => { if (tab === 'roles') loadPerms(); }, [tab]);
 
   // ── User handlers ────────────────────────────────────────────
-  const openDetail = (u: User) => { setSelected(u); setEditMode(false); setEditError(''); setEditSaved(false); setConfirmDeactivate(false); };
-  const closeDetail = () => { setSelected(null); setEditMode(false); setConfirmDeactivate(false); };
+  const openDetail = (u: User) => { setSelected(u); setEditMode(false); setEditError(''); setEditSaved(false); setConfirmDeactivate(false); setShowResetPwd(false); setResetPwdForm({ next: '', confirm: '' }); setResetPwdError(''); setResetPwdSuccess(false); };
+  const closeDetail = () => { setSelected(null); setEditMode(false); setConfirmDeactivate(false); setShowResetPwd(false); };
   const openEdit = (u: User) => {
     setEditForm({ full_name: u.full_name, email: u.email, department: u.department || '', employee_id: (u as any).employee_id || '', role: u.role });
     setEditError(''); setEditSaved(false); setEditMode(true);
@@ -147,7 +154,7 @@ export default function UsersPage() {
       setEditMode(false); setEditSaved(true);
       setTimeout(() => setEditSaved(false), 3000);
     } catch (err: any) {
-      setEditError(err?.response?.data?.detail || 'Failed to save changes.');
+      setEditError(extractApiError(err, 'Failed to save changes.'));
     } finally { setEditSaving(false); }
   };
 
@@ -158,8 +165,24 @@ export default function UsersPage() {
       await usersApi.update(selected.id, { is_active: false });
       closeDetail(); loadUsers();
     } catch (err: any) {
-      setEditError(err?.response?.data?.detail || 'Failed to deactivate user.');
+      setEditError(extractApiError(err, 'Failed to deactivate user.'));
     } finally { setDeactivating(false); }
+  };
+
+  const handleResetPassword = async () => {
+    if (!selected) return;
+    setResetPwdError(''); setResetPwdSuccess(false);
+    if (!resetPwdForm.next || !resetPwdForm.confirm) { setResetPwdError('Both fields are required.'); return; }
+    if (resetPwdForm.next !== resetPwdForm.confirm) { setResetPwdError('Passwords do not match.'); return; }
+    setResetPwdSaving(true);
+    try {
+      await usersApi.resetPassword(selected.id, resetPwdForm.next);
+      setResetPwdSuccess(true);
+      setResetPwdForm({ next: '', confirm: '' });
+      setTimeout(() => { setShowResetPwd(false); setResetPwdSuccess(false); }, 1800);
+    } catch (err: any) {
+      setResetPwdError(extractApiError(err, 'Failed to reset password.'));
+    } finally { setResetPwdSaving(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -175,7 +198,7 @@ export default function UsersPage() {
       await usersApi.create(payload);
       setShowModal(false); loadUsers();
     } catch (err: any) {
-      setFormError(err?.response?.data?.detail || 'Failed to create user.');
+      setFormError(extractApiError(err, 'Failed to create user.'));
     } finally { setSaving(false); }
   };
 
@@ -380,6 +403,66 @@ export default function UsersPage() {
                   <DetailRow label="Created"     value={new Date(selected.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} />
                 </div>
               )}
+              {/* Reset Password — admins & managers can reset other users' passwords */}
+              {me?.id !== selected.id && !editMode && canManage && (isAdmin || selected.role !== 'admin') && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={s.sectionTitle}>Password Reset</div>
+                  {!showResetPwd ? (
+                    <button
+                      style={{ padding: '7px 16px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => { setShowResetPwd(true); setResetPwdForm({ next: '', confirm: '' }); setResetPwdError(''); setResetPwdSuccess(false); }}
+                    >
+                      Reset Password
+                    </button>
+                  ) : (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
+                      {resetPwdSuccess && (
+                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>
+                          Password reset successfully.
+                        </div>
+                      )}
+                      {resetPwdError && (
+                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>
+                          {resetPwdError}
+                        </div>
+                      )}
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={s.label}>New Password</label>
+                        <input
+                          type="password" autoComplete="new-password"
+                          value={resetPwdForm.next}
+                          onChange={e => setResetPwdForm(p => ({ ...p, next: e.target.value }))}
+                          style={s.field}
+                          placeholder="Min 8 chars, uppercase, lowercase, digit"
+                        />
+                      </div>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={s.label}>Confirm New Password</label>
+                        <input
+                          type="password" autoComplete="new-password"
+                          value={resetPwdForm.confirm}
+                          onChange={e => setResetPwdForm(p => ({ ...p, confirm: e.target.value }))}
+                          style={s.field}
+                          placeholder="Repeat new password"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={handleResetPassword} disabled={resetPwdSaving}
+                          style={{ flex: 1, padding: '8px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                          {resetPwdSaving ? 'Saving…' : 'Set Password'}
+                        </button>
+                        <button
+                          onClick={() => setShowResetPwd(false)}
+                          style={{ padding: '8px 14px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {me?.id !== selected.id && !editMode && (isAdmin || selected.role !== 'admin') && (
                 <>
                   <div style={s.sectionTitle}>Danger Zone</div>

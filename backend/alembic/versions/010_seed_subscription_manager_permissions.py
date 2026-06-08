@@ -37,7 +37,7 @@ def upgrade():
             )
         """))
 
-    # Seed manage_subscriptions for existing roles (MANAGER=enabled, USER=disabled)
+    # Seed manage_subscriptions for existing roles — use UPPERCASE to match PostgreSQL native enum labels
     for role, allowed_sql in [("MANAGER", "true"), ("USER", "false")]:
         op.execute(sa.text(f"""
             INSERT INTO role_permissions (id, role, permission, allowed)
