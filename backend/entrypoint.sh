@@ -29,6 +29,16 @@ except Exception as ex:
 done
 echo "==> Database is ready."
 
+echo "==> Creating base tables..."
+python -c "
+import sys
+sys.path.insert(0, '/app')
+from app.db.base import Base
+from app.db.session import engine
+Base.metadata.create_all(bind=engine)
+print('==> Base tables ready.')
+"
+
 echo "==> Running Alembic migrations..."
 python -m alembic upgrade head
 echo "==> Migrations complete."
