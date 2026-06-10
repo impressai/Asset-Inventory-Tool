@@ -1,11 +1,34 @@
-"""Email sending utility using smtplib."""
+"""Email sending utility using smtplib with forced IPv4."""
 import logging
 import smtplib
+import socket
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class _SMTP_IPv4(smtplib.SMTP):
+    """SMTP client that forces IPv4 to avoid IPv6 routing issues on cloud hosts."""
+    def _get_socket(self, host, port, timeout):
+        for res in socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM):
+            af, socktype, proto, _, sa = res
+            sock = socket.socket(af, socktype, proto)
+            sock.settimeout(timeout)
+            sock.connect(sa)
+            return sock
+
+
+class _SMTP_SSL_IPv4(smtplib.SMTP_SSL):
+    """SMTP_SSL client that forces IPv4."""
+    def _get_socket(self, host, port, timeout):
+        for res in socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM):
+            af, socktype, proto, _, sa = res
+            sock = socket.socket(af, socktype, proto)
+            sock.settimeout(timeout)
+            sock.connect(sa)
+            return sock
 
 
 def send_email(*, to_email: str, to_name: str, subject: str, html_body: str) -> bool:
@@ -21,11 +44,11 @@ def send_email(*, to_email: str, to_name: str, subject: str, html_body: str) -> 
         msg.attach(MIMEText(html_body, "html"))
 
         if settings.SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
+            with _SMTP_SSL_IPv4(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
                 server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                 server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
         else:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
+            with _SMTP_IPv4(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
