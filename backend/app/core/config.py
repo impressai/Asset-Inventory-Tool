@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     S3_BUCKET_DOCUMENTS: str = "asset-inventory-documents"
 
     # ── Email ─────────────────────────────────────────────────
+    RESEND_API_KEY: str = ""
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
