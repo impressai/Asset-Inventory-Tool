@@ -1,21 +1,11 @@
-"""Email sending utility using the `emails` library."""
+"""Email sending utility using smtplib."""
 import logging
-import emails as emails_lib
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-
-def _smtp_options() -> dict:
-    return {
-        "host": settings.SMTP_HOST,
-        "port": settings.SMTP_PORT,
-        "user": settings.SMTP_USER,
-        "password": settings.SMTP_PASSWORD,
-        "tls": settings.SMTP_PORT == 587,
-        "ssl": settings.SMTP_PORT == 465,
-        "timeout": 10,
-    }
 
 
 def send_email(*, to_email: str, to_name: str, subject: str, html_body: str) -> bool:
@@ -24,15 +14,24 @@ def send_email(*, to_email: str, to_name: str, subject: str, html_body: str) -> 
         logger.warning("SMTP not configured — skipping email to %s", to_email)
         return False
     try:
-        message = emails_lib.html(
-            subject=subject,
-            html=html_body,
-            mail_from=(settings.EMAILS_FROM_NAME, settings.EMAILS_FROM_EMAIL),
-        )
-        response = message.send(to=(to_name, to_email), smtp=_smtp_options())
-        if response.status_code not in (250, 200):
-            logger.error("Email send failed to %s: %s", to_email, response)
-            return False
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>"
+        msg["To"] = f"{to_name} <{to_email}>"
+        msg.attach(MIMEText(html_body, "html"))
+
+        if settings.SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.sendmail(settings.EMAILS_FROM_EMAIL, to_email, msg.as_string())
+
         logger.info("Email sent to %s — %s", to_email, subject)
         return True
     except Exception as exc:
