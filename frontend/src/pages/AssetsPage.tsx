@@ -201,8 +201,10 @@ function DetailRow({ label, value }: { label: string; value?: string | null }) {
 export default function AssetsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
-  const isAdmin = user?.role === 'admin';
-  const canAdd  = user?.role === 'admin' || user?.role === 'manager';
+  const isAdmin     = user?.role === 'admin';
+  const canAdd      = user?.role === 'admin' || user?.role === 'manager';
+  const canAssign   = user?.role === 'admin' || user?.role === 'manager';
+  const canReturn   = user?.role === 'admin' || user?.role === 'manager';
 
   const [assets, setAssets]               = useState<Asset[]>([]);
   const [total, setTotal]                 = useState(0);
@@ -829,7 +831,7 @@ export default function AssetsPage() {
                 </button>
                 {actionsOpen && (
                   <div style={{ position: 'absolute', top: '110%', left: 0, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.12)', minWidth: 180, zIndex: 50, overflow: 'hidden' }}>
-                    {(detailAsset.status === 'stock' || detailAsset.status === 'faulty') && (
+                    {canAssign && (detailAsset.status === 'stock' || detailAsset.status === 'faulty') && (
                       <button style={dropItem} onClick={() => { setActionsOpen(false); setActionPanel(actionPanel === 'assign' ? null : 'assign'); setAssignForm({ ...EMPTY_ASSIGN, assignment_date: today() }); setAssignError(''); }}>
                         Assign Asset
                       </button>
@@ -907,18 +909,20 @@ export default function AssetsPage() {
                           <DetailRow label="Assigned On"   value={fmt(activeAssignment.assignment_date)} />
                           <DetailRow label="Expected Back" value={fmt(activeAssignment.expected_return_date)} />
                         </div>
-                        {canAdd && (
+                        {canAssign && (
                           <button style={{ ...s.btnGhost, padding: '5px 12px', fontSize: 12, flexShrink: 0 }} onClick={openEditAssign}>✎ Edit</button>
                         )}
                       </div>
                       {activeAssignment.notes && (
                         <div style={{ fontSize: 12, color: '#64748b', marginTop: 6 }}>{activeAssignment.notes}</div>
                       )}
-                      <div style={{ marginTop: 14 }}>
-                        <button style={s.btnRed} disabled={returning} onClick={() => handleReturn(activeAssignment.id)}>
-                          {returning ? 'Returning…' : 'Return Asset'}
-                        </button>
-                      </div>
+                      {canReturn && (
+                        <div style={{ marginTop: 14 }}>
+                          <button style={s.btnRed} disabled={returning} onClick={() => handleReturn(activeAssignment.id)}>
+                            {returning ? 'Returning…' : 'Return Asset'}
+                          </button>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
