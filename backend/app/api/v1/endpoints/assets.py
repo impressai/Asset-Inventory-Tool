@@ -219,6 +219,12 @@ def delete_asset(
 
     asset.is_active = False
 
+    # Deactivate any open assignments for this asset
+    db.query(Assignment).filter(
+        Assignment.asset_id == asset_id,
+        Assignment.is_active == True,
+    ).update({"is_active": False}, synchronize_session=False)
+
     history = AssetHistory(
         asset_id=asset_id,
         event_type=HistoryEventType.DISPOSED,

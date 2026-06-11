@@ -47,6 +47,7 @@ def overdue_assignments(db: Session = Depends(get_db), current_user=Depends(requ
         .join(Assignment.asset)
         .filter(
             Assignment.is_active == True,
+            Asset.is_active == True,
             Assignment.expected_return_date != None,
             Assignment.expected_return_date < today,
         )

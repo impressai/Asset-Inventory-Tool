@@ -100,6 +100,7 @@ def _send_daily_alerts() -> None:
                 db.query(Assignment).join(Assignment.asset)
                 .filter(
                     Assignment.is_active == True,
+                    Asset.is_active == True,
                     Assignment.expected_return_date != None,
                     Assignment.expected_return_date < today,
                 ).all()
