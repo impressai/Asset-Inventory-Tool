@@ -1,26 +1,37 @@
-"""Email sending utility using Resend HTTP API."""
+"""Email sending utility using AWS SES."""
 import logging
-import resend
+import boto3
+from botocore.exceptions import ClientError
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 def send_email(*, to_email: str, to_name: str, subject: str, html_body: str) -> bool:
-    """Send an HTML email via Resend. Returns True on success, False on failure."""
-    if not settings.RESEND_API_KEY:
-        logger.warning("RESEND_API_KEY not configured — skipping email to %s", to_email)
+    """Send an HTML email via AWS SES. Returns True on success, False on failure."""
+    if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+        logger.warning("AWS credentials not configured — skipping email to %s", to_email)
         return False
     try:
-        resend.api_key = settings.RESEND_API_KEY
-        resend.Emails.send({
-            "from": f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>",
-            "to": [to_email],
-            "subject": subject,
-            "html": html_body,
-        })
+        client = boto3.client(
+            "ses",
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+        client.send_email(
+            Source=f"{settings.EMAILS_FROM_NAME} <{settings.EMAILS_FROM_EMAIL}>",
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": html_body, "Charset": "UTF-8"}},
+            },
+        )
         logger.info("Email sent to %s — %s", to_email, subject)
         return True
+    except ClientError as exc:
+        logger.error("SES error for %s: %s", to_email, exc.response["Error"]["Message"])
+        return False
     except Exception as exc:
         logger.error("Email exception for %s: %s", to_email, exc)
         return False
