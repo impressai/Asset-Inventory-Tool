@@ -34,15 +34,62 @@ def _notify_all_users(db: Session, subject: str, html_body_fn):
                    html_body=html_body_fn(user.full_name))
 
 
-def _next_asset_tag(db: Session) -> str:
-    """Generate the next asset tag by incrementing the highest existing number."""
-    max_tag = db.query(func.max(Asset.asset_tag)).scalar()
+_CATEGORY_PREFIX: dict = {
+    'laptop':           'LAP',
+    'macbook':          'LAP',
+    'desktop':          'DSK',
+    'monitor':          'MON',
+    'keyboard':         'KEY',
+    'mouse':            'MOU',
+    'printer':          'PRT',
+    'scanner':          'SCN',
+    'projector':        'PRJ',
+    'network switch':   'NSW',
+    'router':           'RTR',
+    'server':           'SRV',
+    'ups':              'UPS',
+    'headset':          'HDS',
+    'webcam':           'CAM',
+    'mobile phone':     'MOB',
+    'tablet':           'TAB',
+    'hard drive':       'HDD',
+    'ssd':              'HDD',
+    'software':         'SOFT',
+    'other':            'OTH',
+}
+
+
+def _category_prefix(category: str) -> str:
+    cat = category.lower().strip()
+    for key, prefix in _CATEGORY_PREFIX.items():
+        if key in cat:
+            return prefix
+    return 'OTH'
+
+
+def _next_asset_tag(db: Session, category: str = "") -> str:
+    """Generate next tag for the given category, e.g. IMP-LAP001."""
+    prefix = _category_prefix(category) if category else 'AST'
+    pattern = f"IMP-{prefix}%"
+    max_tag = db.query(func.max(Asset.asset_tag)).filter(
+        Asset.asset_tag.like(pattern)
+    ).scalar()
     if max_tag:
         m = re.search(r"(\d+)$", max_tag)
         next_num = int(m.group(1)) + 1 if m else 1
     else:
         next_num = 1
-    return f"AST-{next_num:04d}"
+    return f"IMP-{prefix}{next_num:03d}"
+
+
+@router.get("/next-tag")
+def get_next_tag(
+    category: str = Query(..., description="Asset category"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the next auto-generated asset tag for a given category."""
+    return {"asset_tag": _next_asset_tag(db, category)}
 
 
 @router.get("", response_model=AssetListResponse)
@@ -124,10 +171,14 @@ def create_asset(
     current_user: User = Depends(check_permission("create_asset")),
 ):
     """Create a new asset. Admin only."""
-    asset_tag = _next_asset_tag(db)
+    asset_tag = _next_asset_tag(db, payload.category)
 
     try:
-        asset = Asset(**payload.model_dump(), asset_tag=asset_tag)
+        data = payload.model_dump()
+        override_tag = data.pop("asset_tag", None)
+        if override_tag and override_tag.strip():
+            asset_tag = override_tag.strip().upper()
+        asset = Asset(**data, asset_tag=asset_tag)
         db.add(asset)
         db.flush()
         history = AssetHistory(

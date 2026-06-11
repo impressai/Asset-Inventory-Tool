@@ -71,7 +71,7 @@ const s: Record<string, React.CSSProperties> = {
 };
 
 const EMPTY_FORM = {
-  name: '', category: '', brand: '', model_number: '', serial_number: '',
+  name: '', category: '', asset_tag: '', brand: '', model_number: '', serial_number: '',
   condition: 'new' as AssetCondition, status: 'stock' as AssetStatus,
   location: '', notes: '', expiry_date: '', license_start_date: '',
 };
@@ -1423,11 +1423,27 @@ export default function AssetsPage() {
                 </div>
                 <div>
                   <label style={s.label}>Category *</label>
-                  <select style={s.addField} value={form.category} onChange={set('category')} required>
+                  <select style={s.addField} value={form.category} onChange={async (e) => {
+                    const cat = e.target.value;
+                    setForm((f) => ({ ...f, category: cat, asset_tag: '' }));
+                    if (cat) {
+                      try {
+                        const res = await assetsApi.nextTag(cat);
+                        setForm((f) => ({ ...f, asset_tag: res.asset_tag }));
+                      } catch {}
+                    }
+                  }} required>
                     <option value="">Select a category</option>
                     {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={s.row2}>
+                <div>
+                  <label style={s.label}>Asset Tag</label>
+                  <input style={s.addField} value={form.asset_tag} onChange={set('asset_tag')} placeholder="Auto-generated" />
+                </div>
+                <div />
               </div>
               <div style={s.row2}>
                 <div>

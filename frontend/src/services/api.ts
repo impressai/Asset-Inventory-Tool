@@ -100,6 +100,9 @@ export const assetsApi = {
 
   exportAll: (params?: Record<string, unknown>): Promise<AssetListResponse> =>
     api.get('/assets', { params: { ...params, page: 1, page_size: 1000 } }).then(r => r.data),
+
+  nextTag: (category: string): Promise<{ asset_tag: string }> =>
+    api.get('/assets/next-tag', { params: { category } }).then(r => r.data),
 };
 
 // ─── Assignments ──────────────────────────────────────────────
