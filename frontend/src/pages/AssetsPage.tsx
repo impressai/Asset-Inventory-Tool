@@ -627,10 +627,11 @@ export default function AssetsPage() {
         const model_number = slashIdx > -1 ? mfgRaw.slice(slashIdx + 1).trim() : (r.model_number || undefined);
 
         // If "Asset Name" looks like a tag (e.g. IMP-LAP001), use it as the tag
-        // and take the actual name from Manufacturer/Model
+        // and build the actual name from Manufacturer + Model (e.g. "Dell Latitude 5490")
         const nameRaw = (r.name || '').trim();
         const isTagFormat = /^[A-Z]{2,6}-[A-Z]+\d+$/i.test(nameRaw);
-        const assetName = isTagFormat ? (mfgRaw.trim() || nameRaw) : (nameRaw || mfgRaw.trim() || '');
+        const mfgName = [brand, model_number].filter(Boolean).join(' ');
+        const assetName = isTagFormat ? (mfgName || nameRaw) : (nameRaw || mfgName || '');
         const assetTag  = isTagFormat ? nameRaw.toUpperCase() : undefined;
 
         // Normalise status
