@@ -650,6 +650,11 @@ export default function AssetsPage() {
           return isNaN(d.getTime()) ? undefined : d.toISOString().slice(0, 10);
         };
 
+        // For 'assigned' rows create as 'stock' first so the assignment endpoint
+        // can accept it (it rejects if status is already 'assigned') and will
+        // set status → 'assigned' itself after creating the record.
+        const createStatus = status === 'assigned' ? 'stock' : status;
+
         const asset = await assetsApi.create({
           name:                 assetName,
           asset_tag:            assetTag,
@@ -658,7 +663,7 @@ export default function AssetsPage() {
           model_number:         model_number || undefined,
           serial_number:        r.serial_number || undefined,
           condition:            (['new','good','damaged','retired'].includes(r.condition || '') ? r.condition : 'good') as AssetCondition,
-          status,
+          status:               createStatus,
           location:             r.location || undefined,
           purchase_date:        r.purchase_date || undefined,
           warranty_expiry_date: parseDate(r.warranty_expiry_date || ''),
@@ -667,8 +672,8 @@ export default function AssetsPage() {
 
         created++;
 
-        // Only create assignment when status is 'assigned' — creating one for sold/faulty
-        // assets would override their status to 'assigned' on the backend
+        // Only create assignment when status is 'assigned' — skipping this for
+        // sold/faulty/stock assets prevents their status from being overridden.
         if (status === 'assigned' && (r.assignee_name || r.employee_id || r.assignee_email)) {
           try {
             await assignmentsApi.create({
