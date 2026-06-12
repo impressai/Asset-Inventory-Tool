@@ -626,6 +626,13 @@ export default function AssetsPage() {
         const brand       = slashIdx > -1 ? mfgRaw.slice(0, slashIdx).trim() : mfgRaw.trim() || undefined;
         const model_number = slashIdx > -1 ? mfgRaw.slice(slashIdx + 1).trim() : (r.model_number || undefined);
 
+        // If "Asset Name" looks like a tag (e.g. IMP-LAP001), use it as the tag
+        // and take the actual name from Manufacturer/Model
+        const nameRaw = (r.name || '').trim();
+        const isTagFormat = /^[A-Z]{2,6}-[A-Z]+\d+$/i.test(nameRaw);
+        const assetName = isTagFormat ? (mfgRaw.trim() || nameRaw) : (nameRaw || mfgRaw.trim() || '');
+        const assetTag  = isTagFormat ? nameRaw.toUpperCase() : undefined;
+
         // Normalise status
         const rawStatus = (r.status || '').toLowerCase().trim();
         const status: AssetStatus = (
@@ -643,7 +650,8 @@ export default function AssetsPage() {
         };
 
         const asset = await assetsApi.create({
-          name:                 r.name,
+          name:                 assetName,
+          asset_tag:            assetTag,
           category:             r.category || defaultCategory,
           brand:                brand || undefined,
           model_number:         model_number || undefined,
@@ -658,8 +666,9 @@ export default function AssetsPage() {
 
         created++;
 
-        // Create assignment if owner/employee data present
-        if (r.assignee_name || r.employee_id || r.assignee_email) {
+        // Only create assignment when status is 'assigned' — creating one for sold/faulty
+        // assets would override their status to 'assigned' on the backend
+        if (status === 'assigned' && (r.assignee_name || r.employee_id || r.assignee_email)) {
           try {
             await assignmentsApi.create({
               asset_id:       asset.id,
