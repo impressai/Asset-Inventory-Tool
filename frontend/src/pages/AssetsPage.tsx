@@ -631,7 +631,7 @@ export default function AssetsPage() {
         const nameRaw = (r.name || '').trim();
         const isTagFormat = /^[A-Z]{2,6}-[A-Z]+\d+$/i.test(nameRaw);
         const mfgName = [brand, model_number].filter(Boolean).join(' ');
-        const assetName = isTagFormat ? (mfgName || nameRaw) : (nameRaw || mfgName || '');
+        const assetName = isTagFormat ? nameRaw : (nameRaw || mfgName || '');
         const assetTag  = isTagFormat ? nameRaw.toUpperCase() : undefined;
 
         // Normalise status
