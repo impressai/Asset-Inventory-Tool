@@ -215,7 +215,7 @@ export default function ReportsPage() {
   /* ── grouped display ── */
   const grouped: Record<string, ReportAsset[]> | null = (() => {
     if (!reportData) return null;
-    if (genType === 'location' && !locFilter)
+    if (genType === 'location' && !locFilter)  // no specific location → group all by location
       return reportData.reduce((acc, a) => {
         const k = a.location || 'No Location';
         if (!acc[k]) acc[k] = [];
@@ -307,12 +307,12 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Location — filter (hidden for Location Report since it auto-groups all) */}
-          {reportType !== 'overdue' && reportType !== 'location' && (
+          {/* Location filter */}
+          {reportType !== 'overdue' && (
             <div>
               <label style={s.label}>Location</label>
               <select style={s.select} value={locFilter} onChange={e => setLocFilter(e.target.value)}>
-                <option value="">All Locations</option>
+                <option value="">{reportType === 'location' ? 'All Locations (grouped)' : 'All Locations'}</option>
                 {locations.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
