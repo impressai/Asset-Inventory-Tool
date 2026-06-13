@@ -17,7 +17,7 @@ const glass: React.CSSProperties = {
   boxShadow: '0 4px 24px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
 };
 
-type ReportType = 'all' | 'assigned' | 'stock' | 'warranty_expiring' | 'license_expiring' | 'overdue';
+type ReportType = 'all' | 'assigned' | 'stock' | 'warranty_expiring' | 'license_expiring' | 'overdue' | 'location';
 
 interface ReportAsset {
   id: string; asset_tag: string; name: string; category: string;
@@ -37,6 +37,7 @@ const REPORT_TYPES: { value: ReportType; label: string; icon: string }[] = [
   { value: 'all',               label: 'Full Inventory',                icon: '📦' },
   { value: 'assigned',          label: 'Assigned Assets',               icon: '👤' },
   { value: 'stock',             label: 'Assets In Stock',               icon: '🏪' },
+  { value: 'location',          label: 'Location Report',               icon: '📍' },
   { value: 'warranty_expiring', label: 'Warranty Expiring',             icon: '⚠️' },
   { value: 'license_expiring',  label: 'License / Subscription Expiry', icon: '📋' },
   { value: 'overdue',           label: 'Overdue Returns',               icon: '🔴' },
@@ -76,6 +77,7 @@ function getColumns(t: ReportType): Column[] {
   if (t === 'overdue')  return [tag, name, cat, assignee, dept, retDate, daysOverdue, status];
   if (t === 'warranty_expiring') return [tag, name, cat, brand, warr, daysLeft, status, loc];
   if (t === 'license_expiring')  return [tag, name, cat, brand, licExp, daysLeft, status, loc];
+  if (t === 'location') return [tag, name, cat, brand, serial, status, assignee, pur];
   return [tag, name, cat, brand, serial, status, cond, loc, pur, warr, licExp, assignee];
 }
 
@@ -162,7 +164,7 @@ export default function ReportsPage() {
   const handleGenerate = async () => {
     setLoading(true);
     try {
-      const params: Record<string, unknown> = { report_type: reportType };
+      const params: Record<string, unknown> = { report_type: reportType === 'location' ? 'all' : reportType };
       if (category) params.category = category;
       if (location) params.location = location;
       if (status && reportType === 'all') params.status = status;
@@ -213,6 +215,13 @@ export default function ReportsPage() {
   /* ── grouped display ── */
   const grouped: Record<string, ReportAsset[]> | null = (() => {
     if (!reportData) return null;
+    if (genType === 'location' && !location)
+      return reportData.reduce((acc, a) => {
+        const k = a.location || 'No Location';
+        if (!acc[k]) acc[k] = [];
+        acc[k].push(a);
+        return acc;
+      }, {} as Record<string, ReportAsset[]>);
     if (groupMode === 'category' && !category)
       return reportData.reduce((acc, a) => {
         const k = a.category || 'Uncategorized';
@@ -298,8 +307,8 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Location */}
-          {reportType !== 'overdue' && (
+          {/* Location — filter (hidden for Location Report since it auto-groups all) */}
+          {reportType !== 'overdue' && reportType !== 'location' && (
             <div>
               <label style={s.label}>Location</label>
               <select style={s.select} value={location} onChange={e => setLocation(e.target.value)}>
@@ -350,16 +359,18 @@ export default function ReportsPage() {
           )}
         </div>
 
-        {/* Grouping mode */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Group by:</span>
-          {(['category', 'location', 'none'] as const).map(mode => (
-            <label key={mode} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
-              <input type="radio" name="groupMode" value={mode} checked={groupMode === mode} onChange={() => setGroupMode(mode)} />
-              {mode === 'category' ? 'Category' : mode === 'location' ? 'Location' : 'None'}
-            </label>
-          ))}
-        </div>
+        {/* Grouping mode — hidden for Location Report (always groups by location) */}
+        {reportType !== 'location' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Group by:</span>
+            {(['category', 'location', 'none'] as const).map(mode => (
+              <label key={mode} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+                <input type="radio" name="groupMode" value={mode} checked={groupMode === mode} onChange={() => setGroupMode(mode)} />
+                {mode === 'category' ? 'Category' : mode === 'location' ? 'Location' : 'None'}
+              </label>
+            ))}
+          </div>
+        )}
 
         <button style={s.genBtn} onClick={handleGenerate} disabled={loading}>
           {loading ? 'Generating…' : '▶ Generate Report'}
