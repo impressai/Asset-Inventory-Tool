@@ -146,7 +146,7 @@ export default function ReportsPage() {
   const [genType, setGenType]       = useState<ReportType>('all');
   const [categories, setCategories] = useState<string[]>([]);
   const [locations, setLocations]   = useState<string[]>([]);
-  const [location, setLocation]     = useState('');
+  const [locFilter, setLocFilter]   = useState('');
   const printRef = useRef<HTMLDivElement>(null);
 
   const [multiLoading, setMultiLoading]   = useState(false);
@@ -166,7 +166,7 @@ export default function ReportsPage() {
     try {
       const params: Record<string, unknown> = { report_type: reportType === 'location' ? 'all' : reportType };
       if (category) params.category = category;
-      if (location) params.location = location;
+      if (locFilter) params.location = locFilter;
       if (status && reportType === 'all') params.status = status;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo)   params.date_to   = dateTo;
@@ -179,7 +179,7 @@ export default function ReportsPage() {
       const typLabel = REPORT_TYPES.find(t => t.value === reportType)?.label || reportType;
       const parts = [typLabel];
       if (category) parts.push(category);
-      if (location) parts.push(location);
+      if (locFilter) parts.push(locFilter);
       if (status && reportType === 'all') parts.push(status);
       setGenTitle(parts.join(' — '));
     } catch { /* silently fail */ }
@@ -215,7 +215,7 @@ export default function ReportsPage() {
   /* ── grouped display ── */
   const grouped: Record<string, ReportAsset[]> | null = (() => {
     if (!reportData) return null;
-    if (genType === 'location' && !location)
+    if (genType === 'location' && !locFilter)
       return reportData.reduce((acc, a) => {
         const k = a.location || 'No Location';
         if (!acc[k]) acc[k] = [];
@@ -229,7 +229,7 @@ export default function ReportsPage() {
         acc[k].push(a);
         return acc;
       }, {} as Record<string, ReportAsset[]>);
-    if (groupMode === 'location' && !location)
+    if (groupMode === 'location' && !locFilter)
       return reportData.reduce((acc, a) => {
         const k = a.location || 'No Location';
         if (!acc[k]) acc[k] = [];
@@ -311,7 +311,7 @@ export default function ReportsPage() {
           {reportType !== 'overdue' && reportType !== 'location' && (
             <div>
               <label style={s.label}>Location</label>
-              <select style={s.select} value={location} onChange={e => setLocation(e.target.value)}>
+              <select style={s.select} value={locFilter} onChange={e => setLocFilter(e.target.value)}>
                 <option value="">All Locations</option>
                 {locations.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
