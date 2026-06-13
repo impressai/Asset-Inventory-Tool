@@ -23,7 +23,16 @@ def asset_summary(db: Session = Depends(get_db), current_user=Depends(get_curren
     )
     by_category = {row[0]: row[1] for row in rows}
 
-    return {"total_assets": total, "by_status": by_status, "by_category": by_category}
+    loc_rows = (
+        db.query(Asset.location, func.count(Asset.id))
+        .filter(Asset.is_active == True, Asset.location != None, Asset.location != "")
+        .group_by(Asset.location)
+        .order_by(Asset.location)
+        .all()
+    )
+    by_location = {row[0]: row[1] for row in loc_rows}
+
+    return {"total_assets": total, "by_status": by_status, "by_category": by_category, "by_location": by_location}
 
 @router.get("/by-category")
 def by_category_breakdown(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
@@ -46,6 +55,7 @@ def by_category_breakdown(db: Session = Depends(get_db), current_user=Depends(ge
 def report_assets(
     report_type: str = "all",
     category: Optional[str] = None,
+    location: Optional[str] = None,
     status: Optional[str] = None,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
@@ -72,6 +82,8 @@ def report_assets(
         for a in rows:
             if category and a.asset.category != category:
                 continue
+            if location and a.asset.location != location:
+                continue
             result.append({
                 "id": str(a.asset_id), "asset_tag": a.asset.asset_tag,
                 "name": a.asset.name, "category": a.asset.category,
@@ -90,6 +102,8 @@ def report_assets(
 
     if category:
         query = query.filter(Asset.category == category)
+    if location:
+        query = query.filter(Asset.location == location)
     if status and report_type == "all":
         query = query.filter(Asset.status == status)
     if date_from:

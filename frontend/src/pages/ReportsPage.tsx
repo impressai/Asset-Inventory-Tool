@@ -136,13 +136,15 @@ export default function ReportsPage() {
   const [dateFrom, setDateFrom]     = useState('');
   const [dateTo, setDateTo]         = useState('');
   const [days, setDays]             = useState(30);
-  const [groupByCat, setGroupByCat] = useState(true);
+  const [groupMode, setGroupMode]   = useState<'category' | 'location' | 'none'>('category');
 
   const [loading, setLoading]       = useState(false);
   const [reportData, setReportData] = useState<ReportAsset[] | null>(null);
   const [genTitle, setGenTitle]     = useState('');
   const [genType, setGenType]       = useState<ReportType>('all');
   const [categories, setCategories] = useState<string[]>([]);
+  const [locations, setLocations]   = useState<string[]>([]);
+  const [location, setLocation]     = useState('');
   const printRef = useRef<HTMLDivElement>(null);
 
   const [multiLoading, setMultiLoading]   = useState(false);
@@ -151,7 +153,10 @@ export default function ReportsPage() {
   const [multiCategory, setMultiCategory] = useState('');
 
   useEffect(() => {
-    reportsApi.summary().then((s: any) => setCategories(Object.keys(s.by_category || {}))).catch(() => {});
+    reportsApi.summary().then((s: any) => {
+      setCategories(Object.keys(s.by_category || {}));
+      setLocations(Object.keys(s.by_location || {}));
+    }).catch(() => {});
   }, []);
 
   const handleGenerate = async () => {
@@ -159,6 +164,7 @@ export default function ReportsPage() {
     try {
       const params: Record<string, unknown> = { report_type: reportType };
       if (category) params.category = category;
+      if (location) params.location = location;
       if (status && reportType === 'all') params.status = status;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo)   params.date_to   = dateTo;
@@ -171,6 +177,7 @@ export default function ReportsPage() {
       const typLabel = REPORT_TYPES.find(t => t.value === reportType)?.label || reportType;
       const parts = [typLabel];
       if (category) parts.push(category);
+      if (location) parts.push(location);
       if (status && reportType === 'all') parts.push(status);
       setGenTitle(parts.join(' — '));
     } catch { /* silently fail */ }
@@ -204,15 +211,24 @@ export default function ReportsPage() {
   };
 
   /* ── grouped display ── */
-  const grouped: Record<string, ReportAsset[]> | null =
-    (genType === 'all' || genType === 'stock') && groupByCat && !category && reportData
-      ? reportData.reduce((acc, a) => {
-          const k = a.category || 'Uncategorized';
-          if (!acc[k]) acc[k] = [];
-          acc[k].push(a);
-          return acc;
-        }, {} as Record<string, ReportAsset[]>)
-      : null;
+  const grouped: Record<string, ReportAsset[]> | null = (() => {
+    if (!reportData) return null;
+    if (groupMode === 'category' && !category)
+      return reportData.reduce((acc, a) => {
+        const k = a.category || 'Uncategorized';
+        if (!acc[k]) acc[k] = [];
+        acc[k].push(a);
+        return acc;
+      }, {} as Record<string, ReportAsset[]>);
+    if (groupMode === 'location' && !location)
+      return reportData.reduce((acc, a) => {
+        const k = a.location || 'No Location';
+        if (!acc[k]) acc[k] = [];
+        acc[k].push(a);
+        return acc;
+      }, {} as Record<string, ReportAsset[]>);
+    return null;
+  })();
 
   const cols = getColumns(genType);
 
@@ -282,6 +298,17 @@ export default function ReportsPage() {
             </div>
           )}
 
+          {/* Location */}
+          {reportType !== 'overdue' && (
+            <div>
+              <label style={s.label}>Location</label>
+              <select style={s.select} value={location} onChange={e => setLocation(e.target.value)}>
+                <option value="">All Locations</option>
+                {locations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+          )}
+
           {/* Status (only for full inventory) */}
           {reportType === 'all' && (
             <div>
@@ -323,13 +350,16 @@ export default function ReportsPage() {
           )}
         </div>
 
-        {/* Group by category checkbox */}
-        {(reportType === 'all' || reportType === 'stock') && !category && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
-            <input type="checkbox" checked={groupByCat} onChange={e => setGroupByCat(e.target.checked)} />
-            Group by Category
-          </label>
-        )}
+        {/* Grouping mode */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Group by:</span>
+          {(['category', 'location', 'none'] as const).map(mode => (
+            <label key={mode} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+              <input type="radio" name="groupMode" value={mode} checked={groupMode === mode} onChange={() => setGroupMode(mode)} />
+              {mode === 'category' ? 'Category' : mode === 'location' ? 'Location' : 'None'}
+            </label>
+          ))}
+        </div>
 
         <button style={s.genBtn} onClick={handleGenerate} disabled={loading}>
           {loading ? 'Generating…' : '▶ Generate Report'}
