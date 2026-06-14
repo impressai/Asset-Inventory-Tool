@@ -142,6 +142,9 @@ export const assignmentsApi = {
   bulkReturn: (assignmentIds: string[]): Promise<{ returned: number; failed: number; failed_ids: string[] }> =>
     api.post('/assignments/bulk-return', { assignment_ids: assignmentIds }).then(r => r.data),
 
+  employees: (): Promise<{ employee_id: string; name: string; email: string; designation: string; department: string }[]> =>
+    api.get('/assignments/employees').then(r => r.data),
+
   sendClearanceEmail: (data: {
     employee_name: string;
     employee_id?: string;

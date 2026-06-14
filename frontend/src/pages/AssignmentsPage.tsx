@@ -52,17 +52,15 @@ export default function AssignmentsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [loadingAssets, setLoadingAssets] = useState(false);
-  const [empLookup, setEmpLookup] = useState<Record<string, { name: string; email: string; designation: string; department: string }>>({});
+  type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
+  const [empList, setEmpList]     = useState<EmpEntry[]>([]);
+  const [empSuggest, setEmpSuggest] = useState<EmpEntry[]>([]);
 
-  const load = () => assignmentsApi.list().then((data: Assignment[]) => {
-    setAssignments(data);
-    const map: Record<string, { name: string; email: string; designation: string; department: string }> = {};
-    data.forEach((a: any) => {
-      const key = (a.employee_id || '').trim().toUpperCase();
-      if (key) map[key] = { name: a.assignee_name || '', email: a.assignee_email || '', designation: a.designation || '', department: a.department || '' };
-    });
-    setEmpLookup(map);
-  }).catch(() => {});
+  const load = () => assignmentsApi.list().then(setAssignments).catch(() => {});
+
+  useEffect(() => {
+    (assignmentsApi as any).employees().then((list: EmpEntry[]) => setEmpList(list)).catch(() => {});
+  }, []); // eslint-disable-line
 
   useEffect(() => { load(); }, []);
 
@@ -89,12 +87,20 @@ export default function AssignmentsPage() {
 
   const handleEmpIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setForm(f => {
-      const match = empLookup[val.trim().toUpperCase()];
-      return match
-        ? { ...f, employee_id: val, assignee_name: match.name, assignee_email: match.email, designation: match.designation, department: match.department }
-        : { ...f, employee_id: val };
-    });
+    setForm(f => ({ ...f, employee_id: val }));
+    if (val.trim()) {
+      const q = val.trim().toLowerCase();
+      setEmpSuggest(empList.filter(e =>
+        e.employee_id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)
+      ).slice(0, 8));
+    } else {
+      setEmpSuggest([]);
+    }
+  };
+
+  const selectEmployee = (emp: EmpEntry) => {
+    setForm(f => ({ ...f, employee_id: emp.employee_id, assignee_name: emp.name, assignee_email: emp.email, designation: emp.designation, department: emp.department }));
+    setEmpSuggest([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -216,20 +222,24 @@ export default function AssignmentsPage() {
                     ))}
                 </select>
 
-                <label style={s.label}>Employee ID</label>
-                <input
-                  style={s.field}
-                  value={form.employee_id}
-                  onChange={handleEmpIdChange}
-                  placeholder="e.g. IMP001 — auto-fills details if known"
-                  list="emp-id-list-assign"
-                  autoComplete="off"
-                />
-                <datalist id="emp-id-list-assign">
-                  {Object.entries(empLookup).map(([id, emp]) => (
-                    <option key={id} value={id}>{emp.name} — {emp.email}</option>
-                  ))}
-                </datalist>
+                <div style={{ position: 'relative', marginBottom: 14 }}>
+                  <label style={s.label}>Employee ID</label>
+                  <input style={{ ...s.field, marginBottom: 0 }} value={form.employee_id} onChange={handleEmpIdChange} placeholder="Type ID or name…" autoComplete="off" />
+                  {empSuggest.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 50, maxHeight: 220, overflowY: 'auto' }}>
+                      {empSuggest.map(e => (
+                        <div key={e.employee_id} onMouseDown={() => selectEmployee(e)}
+                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                          onMouseEnter={ev => (ev.currentTarget.style.background = '#f8fafc')}
+                          onMouseLeave={ev => (ev.currentTarget.style.background = '')}>
+                          <div style={{ fontWeight: 700, fontSize: 12, color: '#3b82f6' }}>{e.employee_id}</div>
+                          <div style={{ fontSize: 12, color: '#374151' }}>{e.name}</div>
+                          <div style={{ fontSize: 11, color: '#94a3b8' }}>{e.email}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <div style={s.row2}>
                   <div>

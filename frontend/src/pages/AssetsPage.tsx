@@ -240,7 +240,10 @@ export default function AssetsPage() {
   const [statusMoving, setStatusMoving]     = useState(false);
 
   /* employee lookup for auto-fill */
-  const [empLookup, setEmpLookup] = useState<Record<string, { name: string; email: string; designation: string; department: string }>>({});
+  type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
+  const [empList, setEmpList]   = useState<EmpEntry[]>([]);
+  const [empLookup, setEmpLookup] = useState<Record<string, EmpEntry>>({});
+  const [empSuggest, setEmpSuggest] = useState<EmpEntry[]>([]);
 
   /* edit assignment */
   const [editAssignMode, setEditAssignMode]   = useState(false);
@@ -318,19 +321,12 @@ export default function AssetsPage() {
 
   useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter, sortBy, sortDir]); // eslint-disable-line
 
-  /* Build employee lookup from all past assignments for auto-fill */
+  /* Build employee lookup from dedicated endpoint */
   useEffect(() => {
-    assignmentsApi.list().then((all: any[]) => {
-      const map: Record<string, { name: string; email: string; designation: string; department: string }> = {};
-      all.forEach((a: any) => {
-        const key = (a.employee_id || '').trim().toUpperCase();
-        if (key) map[key] = {
-          name:        a.assignee_name  || '',
-          email:       a.assignee_email || '',
-          designation: a.designation   || '',
-          department:  a.department    || '',
-        };
-      });
+    (assignmentsApi as any).employees().then((list: any[]) => {
+      setEmpList(list);
+      const map: Record<string, any> = {};
+      list.forEach(e => { map[e.employee_id.toUpperCase()] = e; });
       setEmpLookup(map);
     }).catch(() => {});
   }, []); // eslint-disable-line
@@ -560,12 +556,20 @@ export default function AssetsPage() {
 
   const handleEmpIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setAssignForm(f => {
-      const match = empLookup[val.trim().toUpperCase()];
-      return match
-        ? { ...f, employee_id: val, assignee_name: match.name, assignee_email: match.email, designation: match.designation, department: match.department }
-        : { ...f, employee_id: val };
-    });
+    setAssignForm(f => ({ ...f, employee_id: val }));
+    if (val.trim()) {
+      const q = val.trim().toLowerCase();
+      setEmpSuggest(empList.filter(e =>
+        e.employee_id.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)
+      ).slice(0, 8));
+    } else {
+      setEmpSuggest([]);
+    }
+  };
+
+  const selectEmployee = (emp: any) => {
+    setAssignForm(f => ({ ...f, employee_id: emp.employee_id, assignee_name: emp.name, assignee_email: emp.email, designation: emp.designation, department: emp.department }));
+    setEmpSuggest([]);
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -990,14 +994,23 @@ export default function AssetsPage() {
                         <label style={s.label}>Assignee Name *</label>
                         <input style={s.field} value={assignForm.assignee_name} onChange={setA('assignee_name')} placeholder="e.g. John Smith" required />
                       </div>
-                      <div>
+                      <div style={{ position: 'relative' }}>
                         <label style={s.label}>Employee ID</label>
-                        <input style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="e.g. IMP001" list="emp-id-list" autoComplete="off" />
-                        <datalist id="emp-id-list">
-                          {Object.entries(empLookup).map(([id, emp]) => (
-                            <option key={id} value={id}>{emp.name} — {emp.email}</option>
-                          ))}
-                        </datalist>
+                        <input style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="Type ID or name…" autoComplete="off" />
+                        {empSuggest.length > 0 && (
+                          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 50, maxHeight: 220, overflowY: 'auto' }}>
+                            {empSuggest.map(e => (
+                              <div key={e.employee_id} onMouseDown={() => selectEmployee(e)}
+                                style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                                onMouseEnter={ev => (ev.currentTarget.style.background = '#f8fafc')}
+                                onMouseLeave={ev => (ev.currentTarget.style.background = '')}>
+                                <div style={{ fontWeight: 700, fontSize: 12, color: '#3b82f6' }}>{e.employee_id}</div>
+                                <div style={{ fontSize: 12, color: '#374151' }}>{e.name}</div>
+                                <div style={{ fontSize: 11, color: '#94a3b8' }}>{e.email}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={s.row2}>

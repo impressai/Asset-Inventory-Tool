@@ -24,6 +24,32 @@ from app.core.email import send_email, asset_assigned_email, asset_returned_emai
 router = APIRouter()
 
 
+@router.get("/employees")
+def list_employees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all unique employees ever assigned an asset."""
+    rows = (
+        db.query(
+            Assignment.employee_id,
+            Assignment.assignee_name,
+            Assignment.assignee_email,
+            Assignment.designation,
+            Assignment.department,
+        )
+        .filter(Assignment.employee_id != None, Assignment.employee_id != "")
+        .distinct(Assignment.employee_id)
+        .order_by(Assignment.employee_id)
+        .all()
+    )
+    return [
+        {"employee_id": r.employee_id, "name": r.assignee_name, "email": r.assignee_email,
+         "designation": r.designation or "", "department": r.department or ""}
+        for r in rows
+    ]
+
+
 @router.get("", response_model=list[AssignmentResponse])
 def list_assignments(
     asset_id: UUID | None = None,
