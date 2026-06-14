@@ -222,7 +222,14 @@ export default function AssignmentsPage() {
                   value={form.employee_id}
                   onChange={handleEmpIdChange}
                   placeholder="e.g. IMP001 — auto-fills details if known"
+                  list="emp-id-list-assign"
+                  autoComplete="off"
                 />
+                <datalist id="emp-id-list-assign">
+                  {Object.entries(empLookup).map(([id, emp]) => (
+                    <option key={id} value={id}>{emp.name} — {emp.email}</option>
+                  ))}
+                </datalist>
 
                 <div style={s.row2}>
                   <div>

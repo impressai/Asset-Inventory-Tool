@@ -992,7 +992,12 @@ export default function AssetsPage() {
                       </div>
                       <div>
                         <label style={s.label}>Employee ID</label>
-                        <input style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="e.g. IMP001" />
+                        <input style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="e.g. IMP001" list="emp-id-list" autoComplete="off" />
+                        <datalist id="emp-id-list">
+                          {Object.entries(empLookup).map(([id, emp]) => (
+                            <option key={id} value={id}>{emp.name} — {emp.email}</option>
+                          ))}
+                        </datalist>
                       </div>
                     </div>
                     <div style={s.row2}>
