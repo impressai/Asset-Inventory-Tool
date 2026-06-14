@@ -32,8 +32,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const EMPTY_FORM = {
   asset_id: '',
+  employee_id: '',
   assignee_name: '',
   assignee_email: '',
+  designation: '',
   department: '',
   assignment_date: today(),
   expected_return_date: '',
@@ -50,8 +52,17 @@ export default function AssignmentsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [loadingAssets, setLoadingAssets] = useState(false);
+  const [empLookup, setEmpLookup] = useState<Record<string, { name: string; email: string; designation: string; department: string }>>({});
 
-  const load = () => assignmentsApi.list().then(setAssignments).catch(() => {});
+  const load = () => assignmentsApi.list().then((data: Assignment[]) => {
+    setAssignments(data);
+    const map: Record<string, { name: string; email: string; designation: string; department: string }> = {};
+    data.forEach((a: any) => {
+      const key = (a.employee_id || '').trim().toUpperCase();
+      if (key) map[key] = { name: a.assignee_name || '', email: a.assignee_email || '', designation: a.designation || '', department: a.department || '' };
+    });
+    setEmpLookup(map);
+  }).catch(() => {});
 
   useEffect(() => { load(); }, []);
 
@@ -76,6 +87,16 @@ export default function AssignmentsPage() {
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  const handleEmpIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setForm(f => {
+      const match = empLookup[val.trim().toUpperCase()];
+      return match
+        ? { ...f, employee_id: val, assignee_name: match.name, assignee_email: match.email, designation: match.designation, department: match.department }
+        : { ...f, employee_id: val };
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -89,7 +110,9 @@ export default function AssignmentsPage() {
         assignee_name:  form.assignee_name.trim(),
         assignment_date: form.assignment_date || today(),
       };
-      if (form.assignee_email.trim())    payload.assignee_email    = form.assignee_email.trim();
+      if (form.employee_id.trim())        payload.employee_id        = form.employee_id.trim();
+      if (form.assignee_email.trim())    payload.assignee_email     = form.assignee_email.trim();
+      if (form.designation.trim())       payload.designation        = form.designation.trim();
       if (form.department.trim())        payload.department         = form.department.trim();
       if (form.expected_return_date)     payload.expected_return_date = form.expected_return_date;
       if (form.notes.trim())             payload.notes              = form.notes.trim();
@@ -193,25 +216,30 @@ export default function AssignmentsPage() {
                     ))}
                 </select>
 
-                <label style={s.label}>Assignee Name *</label>
+                <label style={s.label}>Employee ID</label>
                 <input
                   style={s.field}
-                  value={form.assignee_name}
-                  onChange={set('assignee_name')}
-                  placeholder="e.g. John Smith"
-                  required
-                />
-
-                <label style={s.label}>Assignee Email</label>
-                <input
-                  style={s.field}
-                  type="email"
-                  value={form.assignee_email}
-                  onChange={set('assignee_email')}
-                  placeholder="e.g. john@company.com"
+                  value={form.employee_id}
+                  onChange={handleEmpIdChange}
+                  placeholder="e.g. IMP001 — auto-fills details if known"
                 />
 
                 <div style={s.row2}>
+                  <div>
+                    <label style={s.label}>Assignee Name *</label>
+                    <input style={s.field} value={form.assignee_name} onChange={set('assignee_name')} placeholder="e.g. John Smith" required />
+                  </div>
+                  <div>
+                    <label style={s.label}>Assignee Email</label>
+                    <input style={s.field} type="email" value={form.assignee_email} onChange={set('assignee_email')} placeholder="john@company.com" />
+                  </div>
+                </div>
+
+                <div style={s.row2}>
+                  <div>
+                    <label style={s.label}>Designation</label>
+                    <input style={s.field} value={form.designation} onChange={set('designation')} placeholder="e.g. Software Engineer" />
+                  </div>
                   <div>
                     <label style={s.label}>Department</label>
                     <input
@@ -221,25 +249,18 @@ export default function AssignmentsPage() {
                       placeholder="e.g. Engineering"
                     />
                   </div>
-                  <div>
-                    <label style={s.label}>Assignment Date *</label>
-                    <input
-                      style={s.field}
-                      type="date"
-                      value={form.assignment_date}
-                      onChange={set('assignment_date')}
-                      required
-                    />
-                  </div>
                 </div>
 
-                <label style={s.label}>Expected Return Date</label>
-                <input
-                  style={s.field}
-                  type="date"
-                  value={form.expected_return_date}
-                  onChange={set('expected_return_date')}
-                />
+                <div style={s.row2}>
+                  <div>
+                    <label style={s.label}>Assignment Date *</label>
+                    <input style={s.field} type="date" value={form.assignment_date} onChange={set('assignment_date')} required />
+                  </div>
+                  <div>
+                    <label style={s.label}>Expected Return Date</label>
+                    <input style={s.field} type="date" value={form.expected_return_date} onChange={set('expected_return_date')} />
+                  </div>
+                </div>
 
                 <label style={s.label}>Notes</label>
                 <textarea

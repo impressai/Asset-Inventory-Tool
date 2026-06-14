@@ -239,6 +239,9 @@ export default function AssetsPage() {
   const [returning, setReturning]           = useState(false);
   const [statusMoving, setStatusMoving]     = useState(false);
 
+  /* employee lookup for auto-fill */
+  const [empLookup, setEmpLookup] = useState<Record<string, { name: string; email: string; designation: string; department: string }>>({});
+
   /* edit assignment */
   const [editAssignMode, setEditAssignMode]   = useState(false);
   const [editAssignForm, setEditAssignForm]   = useState<Record<string, string>>({});
@@ -314,6 +317,23 @@ export default function AssetsPage() {
   }, [searchParams]); // eslint-disable-line
 
   useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter, sortBy, sortDir]); // eslint-disable-line
+
+  /* Build employee lookup from all past assignments for auto-fill */
+  useEffect(() => {
+    assignmentsApi.list().then((all: any[]) => {
+      const map: Record<string, { name: string; email: string; designation: string; department: string }> = {};
+      all.forEach((a: any) => {
+        const key = (a.employee_id || '').trim().toUpperCase();
+        if (key) map[key] = {
+          name:        a.assignee_name  || '',
+          email:       a.assignee_email || '',
+          designation: a.designation   || '',
+          department:  a.department    || '',
+        };
+      });
+      setEmpLookup(map);
+    }).catch(() => {});
+  }, []); // eslint-disable-line
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -537,6 +557,16 @@ export default function AssetsPage() {
     setForm((f) => ({ ...f, [field]: e.target.value }));
   const setA = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setAssignForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const handleEmpIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setAssignForm(f => {
+      const match = empLookup[val.trim().toUpperCase()];
+      return match
+        ? { ...f, employee_id: val, assignee_name: match.name, assignee_email: match.email, designation: match.designation, department: match.department }
+        : { ...f, employee_id: val };
+    });
+  };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -962,7 +992,7 @@ export default function AssetsPage() {
                       </div>
                       <div>
                         <label style={s.label}>Employee ID</label>
-                        <input style={s.field} value={assignForm.employee_id} onChange={setA('employee_id')} placeholder="e.g. EMP-001" />
+                        <input style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="e.g. IMP001" />
                       </div>
                     </div>
                     <div style={s.row2}>
