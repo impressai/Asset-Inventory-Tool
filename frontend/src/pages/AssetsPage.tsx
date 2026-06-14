@@ -323,7 +323,7 @@ export default function AssetsPage() {
 
   /* Build employee lookup from dedicated endpoint */
   useEffect(() => {
-    (assignmentsApi as any).employees().then((list: any[]) => {
+    assignmentsApi.employees().then((list: any[]) => {
       setEmpList(list);
       const map: Record<string, any> = {};
       list.forEach(e => { map[e.employee_id.toUpperCase()] = e; });

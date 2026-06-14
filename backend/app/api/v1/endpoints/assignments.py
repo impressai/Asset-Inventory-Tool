@@ -7,7 +7,7 @@ from datetime import date
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.deps import get_db, get_current_user, require_admin_or_manager, check_permission
@@ -30,21 +30,15 @@ def list_employees(
     current_user: User = Depends(get_current_user),
 ):
     """Return all unique employees ever assigned an asset."""
-    rows = (
-        db.query(
-            Assignment.employee_id,
-            Assignment.assignee_name,
-            Assignment.assignee_email,
-            Assignment.designation,
-            Assignment.department,
-        )
-        .filter(Assignment.employee_id != None, Assignment.employee_id != "")
-        .distinct(Assignment.employee_id)
-        .order_by(Assignment.employee_id)
-        .all()
-    )
+    rows = db.execute(text("""
+        SELECT DISTINCT ON (employee_id)
+            employee_id, assignee_name, assignee_email, designation, department
+        FROM assignments
+        WHERE employee_id IS NOT NULL AND employee_id != ''
+        ORDER BY employee_id, created_at DESC
+    """)).fetchall()
     return [
-        {"employee_id": r.employee_id, "name": r.assignee_name, "email": r.assignee_email,
+        {"employee_id": r.employee_id, "name": r.assignee_name or "", "email": r.assignee_email or "",
          "designation": r.designation or "", "department": r.department or ""}
         for r in rows
     ]

@@ -59,7 +59,7 @@ export default function AssignmentsPage() {
   const load = () => assignmentsApi.list().then(setAssignments).catch(() => {});
 
   useEffect(() => {
-    (assignmentsApi as any).employees().then((list: EmpEntry[]) => setEmpList(list)).catch(() => {});
+    assignmentsApi.employees().then((list: any[]) => setEmpList(list)).catch(() => {});
   }, []); // eslint-disable-line
 
   useEffect(() => { load(); }, []);
