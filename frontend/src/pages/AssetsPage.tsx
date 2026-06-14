@@ -184,6 +184,8 @@ const extractError = (err: any, fallback: string): string => {
   return fallback;
 };
 
+type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
+
 const EMPTY_ASSIGN = {
   assignee_name: '', assignee_email: '', employee_id: '', designation: '',
   department: '', assignment_date: today(), expected_return_date: '', notes: '',
@@ -240,9 +242,7 @@ export default function AssetsPage() {
   const [statusMoving, setStatusMoving]     = useState(false);
 
   /* employee lookup for auto-fill */
-  type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
-  const [empList, setEmpList]   = useState<EmpEntry[]>([]);
-  const [empLookup, setEmpLookup] = useState<Record<string, EmpEntry>>({});
+  const [empList, setEmpList]     = useState<EmpEntry[]>([]);
   const [empSuggest, setEmpSuggest] = useState<EmpEntry[]>([]);
 
   /* edit assignment */
@@ -321,14 +321,9 @@ export default function AssetsPage() {
 
   useEffect(() => { load(); }, [page, statusFilter, conditionFilter, categoryFilter, sortBy, sortDir]); // eslint-disable-line
 
-  /* Build employee lookup from dedicated endpoint */
+  /* Build employee list from dedicated endpoint */
   useEffect(() => {
-    assignmentsApi.employees().then((list: any[]) => {
-      setEmpList(list);
-      const map: Record<string, any> = {};
-      list.forEach(e => { map[e.employee_id.toUpperCase()] = e; });
-      setEmpLookup(map);
-    }).catch(() => {});
+    assignmentsApi.employees().then(setEmpList).catch(() => {});
   }, []); // eslint-disable-line
 
   useEffect(() => {

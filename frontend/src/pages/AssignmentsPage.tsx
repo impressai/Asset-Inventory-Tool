@@ -30,6 +30,8 @@ const s: Record<string, React.CSSProperties> = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
+
 const EMPTY_FORM = {
   asset_id: '',
   employee_id: '',
@@ -52,7 +54,6 @@ export default function AssignmentsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [loadingAssets, setLoadingAssets] = useState(false);
-  type EmpEntry = { employee_id: string; name: string; email: string; designation: string; department: string };
   const [empList, setEmpList]     = useState<EmpEntry[]>([]);
   const [empSuggest, setEmpSuggest] = useState<EmpEntry[]>([]);
 
