@@ -244,7 +244,6 @@ export default function AssetsPage() {
   /* employee lookup for auto-fill */
   const [empList, setEmpList]     = useState<EmpEntry[]>([]);
   const [empSuggest, setEmpSuggest] = useState<EmpEntry[]>([]);
-  const empInputRef = useRef<HTMLInputElement>(null);
 
   /* edit assignment */
   const [editAssignMode, setEditAssignMode]   = useState(false);
@@ -563,9 +562,18 @@ export default function AssetsPage() {
     }
   };
 
-  const selectEmployee = (emp: any) => {
+  const selectEmployee = (emp: EmpEntry) => {
     setAssignForm(f => ({ ...f, employee_id: emp.employee_id, assignee_name: emp.name, assignee_email: emp.email, designation: emp.designation, department: emp.department }));
     setEmpSuggest([]);
+  };
+
+  const handleEmpIdBlur = () => {
+    const q = assignForm.employee_id.trim().toUpperCase();
+    if (q) {
+      const exact = empList.find(e => e.employee_id.toUpperCase() === q);
+      if (exact) selectEmployee(exact);
+    }
+    setTimeout(() => setEmpSuggest([]), 150);
   };
 
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -991,25 +999,32 @@ export default function AssetsPage() {
                         <input style={s.field} value={assignForm.assignee_name} onChange={setA('assignee_name')} placeholder="e.g. John Smith" required />
                       </div>
                       <div>
-                        <label style={s.label}>Employee ID</label>
-                        <input ref={empInputRef} style={s.field} value={assignForm.employee_id} onChange={handleEmpIdChange} placeholder="Type ID or name…" autoComplete="off" />
-                        {empSuggest.length > 0 && empInputRef.current && (() => {
-                          const r = empInputRef.current!.getBoundingClientRect();
-                          return (
-                            <div style={{ position: 'fixed', top: r.bottom + 2, left: r.left, width: r.width, background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 9999, maxHeight: 220, overflowY: 'auto' }}>
-                              {empSuggest.map(e => (
-                                <div key={e.employee_id} onMouseDown={() => selectEmployee(e)}
-                                  style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
-                                  onMouseEnter={ev => (ev.currentTarget.style.background = '#f8fafc')}
-                                  onMouseLeave={ev => (ev.currentTarget.style.background = '')}>
-                                  <div style={{ fontWeight: 700, fontSize: 12, color: '#3b82f6' }}>{e.employee_id}</div>
-                                  <div style={{ fontSize: 12, color: '#374151' }}>{e.name}</div>
-                                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{e.email}</div>
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        })()}
+                        <label style={s.label}>
+                          Employee ID
+                          {empList.length > 0 && <span style={{ fontWeight: 400, color: '#94a3b8', marginLeft: 6 }}>({empList.length} on record)</span>}
+                        </label>
+                        <input
+                          style={s.field}
+                          value={assignForm.employee_id}
+                          onChange={handleEmpIdChange}
+                          onBlur={handleEmpIdBlur}
+                          placeholder="Type ID or name to auto-fill…"
+                          autoComplete="off"
+                        />
+                        {empSuggest.length > 0 && (
+                          <div style={{ border: '1px solid #d1d5db', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', background: '#fff', maxHeight: 200, overflowY: 'auto', marginTop: 2, marginBottom: 8 }}>
+                            {empSuggest.map(emp => (
+                              <div key={emp.employee_id} onMouseDown={() => selectEmployee(emp)}
+                                style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
+                                onMouseEnter={ev => (ev.currentTarget.style.background = '#f0f9ff')}
+                                onMouseLeave={ev => (ev.currentTarget.style.background = '')}>
+                                <span style={{ fontWeight: 700, fontSize: 12, color: '#3b82f6' }}>{emp.employee_id}</span>
+                                <span style={{ fontSize: 12, color: '#374151', marginLeft: 8 }}>{emp.name}</span>
+                                <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 8 }}>{emp.email}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={s.row2}>
